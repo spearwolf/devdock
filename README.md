@@ -42,7 +42,7 @@ Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadu
 
 Bei einem Start ohne Wayland, etwa per SSH auf einem Server, fällt das GUI-Overlay einfach weg.
 
-Der Container-User bekommt beim Build Namen, UID und GID des Host-Users. Ein Image gehört deshalb zu einem Host-User.
+Der Container-User heißt immer `devel` (Home: `/home/devel`), bekommt beim Build aber UID und GID des Host-Users. Ein Image gehört deshalb zu einem Host-User.
 
 ## Playwright mit Fenster
 

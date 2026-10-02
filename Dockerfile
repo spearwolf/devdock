@@ -5,9 +5,9 @@ FROM docker:cli AS docker-cli
 
 FROM ubuntu:26.04
 
-# User wird beim Build an den Host-User angeglichen (UID/GID), damit Workspace,
-# SSH-Agent- und Wayland-Socket ohne Rechte-Akrobatik funktionieren.
-ARG USERNAME=dev
+# Der User heißt devel, UID/GID werden beim Build an den Host-User angeglichen,
+# damit Workspace, SSH-Agent- und Wayland-Socket ohne Rechte-Akrobatik funktionieren.
+ARG USERNAME=devel
 ARG USER_UID=1000
 ARG USER_GID=1000
 

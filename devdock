@@ -40,8 +40,9 @@ cmd=${1:-shell}
 [[ -d $workspace ]] || die "Workspace '$workspace' ist kein Verzeichnis"
 workspace=$(readlink -f "$workspace")
 
+# Der Container-User heißt immer devel; nur UID/GID kommen vom Host.
 export DEVDOCK_USER DEVDOCK_UID DEVDOCK_GID DEVDOCK_WORKSPACE
-DEVDOCK_USER=$(id -un)
+DEVDOCK_USER=devel
 DEVDOCK_UID=$(id -u)
 DEVDOCK_GID=$(id -g)
 DEVDOCK_WORKSPACE=$workspace
