@@ -20,7 +20,11 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 ./devdock -w ~/code/foo tmux # tmux-Session im Workspace ~/code/foo
 ./devdock exec pnpm test     # einzelnes Kommando
 ./devdock down               # Container des Workspaces stoppen und entfernen
+./devdock status             # Image und alle devdock-Container: online/offline
+./devdock destroy            # alle devdock-Container und das Image löschen (fragt nach)
 ```
+
+`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen; die aktualisiert ein `./devdock down` mit anschließendem Neustart. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also gh-Login, Shell-History und Caches). `-y` überspringt die Rückfrage.
 
 Wer `devdock` in den `PATH` verlinkt (`ln -s $PWD/devdock ~/.local/bin/`), kann es aus jedem Projekt heraus aufrufen.
 

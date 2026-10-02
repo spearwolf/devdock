@@ -6,6 +6,9 @@
 #   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
 #   devdock [-w DIR] up|down|ps|logs|config
 #   devdock build                   Image neu bauen (Basis-Image frisch ziehen)
+#   devdock status                  Image und alle Container mit online/offline
+#   devdock destroy [-y] [--volumes]  alle Container und das Image löschen
+#                                   (--volumes auch die geteilten Volumes)
 #   devdock gitconfig               ./gitconfig aus der Host-Config erzeugen (danach read/write)
 #
 # DIR ist per Default das aktuelle Verzeichnis. Pro Workspace läuft ein eigener
@@ -57,6 +60,87 @@ fi
 export DEVDOCK_DOCKER_SOCK=$docker_sock
 export DEVDOCK_DOCKER_GID
 DEVDOCK_DOCKER_GID=$(stat -c %g "$docker_sock")
+
+# --- Status und Abriss -------------------------------------------------------
+#
+# Beide Kommandos sehen alle Workspaces auf einmal. Compose hängt jedem
+# Container das Projektverzeichnis (dieses Repo) als Label an, darüber sind die
+# devdock-Container zu finden; den Workspace verrät ihr working_dir.
+
+image=devdock:latest
+shared_volumes=(devdock-atuin devdock-cache devdock-gh)
+
+devdock_containers() {
+  docker ps -a --filter "label=com.docker.compose.project.working_dir=$here" "$@"
+}
+
+show_status() {
+  local image_id id state status dir container_image notes seen=0
+  image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
+  if [[ -n $image_id ]]; then
+    docker image ls "$image" --format 'image  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}  {{.CreatedSince}}'
+  else
+    echo "image  $image fehlt (devdock build)"
+  fi
+  echo
+  {
+    while IFS=$'\t' read -r id state status; do
+      IFS=$'\t' read -r dir container_image \
+        < <(docker inspect -f $'{{.Config.WorkingDir}}\t{{.Image}}' "$id")
+      notes=
+      [[ $dir == "$workspace" ]] && { notes="dieser Workspace"; seen=1; }
+      [[ -n $image_id && $container_image != "$image_id" ]] && notes+="${notes:+, }altes Image"
+      [[ $state == running ]] && state=online || state=offline
+      printf '%s\t%s\t%s\t%s\n' "$state" "${dir/#$HOME/\~}" "$status" "$notes"
+    done < <(devdock_containers --format $'{{.ID}}\t{{.State}}\t{{.Status}}')
+    ((seen)) || printf 'offline\t%s\tkein Container\tdieser Workspace\n' "${workspace/#$HOME/\~}"
+  } | column -t -s $'\t'
+}
+
+destroy() {
+  local yes=0 volumes=0 arg answer ids=() existing=()
+  for arg; do
+    case $arg in
+      -y | --yes) yes=1 ;;
+      --volumes) volumes=1 ;;
+      *) die "destroy: unbekannte Option '$arg'" ;;
+    esac
+  done
+
+  # Container zuerst: solange einer auf dem Image steht, verweigert docker das rm.
+  mapfile -t ids < <(devdock_containers -q)
+  ((volumes)) && for arg in "${shared_volumes[@]}"; do
+    docker volume inspect "$arg" >/dev/null 2>&1 && existing+=("$arg")
+  done
+
+  local has_image=0
+  docker image inspect "$image" >/dev/null 2>&1 && has_image=1
+  if ((!has_image && ${#ids[@]} == 0 && ${#existing[@]} == 0)); then
+    note "nichts zu löschen"
+    return 0
+  fi
+
+  echo "Gelöscht wird:"
+  ((${#ids[@]})) && echo "  ${#ids[@]} Container (alle Workspaces, auch laufende)"
+  ((has_image)) && echo "  Image $image"
+  ((${#existing[@]})) && echo "  Volumes ${existing[*]} (gh-Login, Shell-History, Caches)"
+
+  if ((!yes)); then
+    [[ -t 0 ]] || die "destroy fragt nach; ohne Terminal nur mit -y"
+    read -rp "Weiter? [y/N] " answer
+    [[ $answer == [yYjJ]* ]] || die "abgebrochen"
+  fi
+
+  ((${#ids[@]})) && docker rm -f "${ids[@]}" >/dev/null
+  ((has_image)) && docker image rm "$image" >/dev/null
+  ((${#existing[@]})) && docker volume rm "${existing[@]}" >/dev/null
+  note "erledigt"
+}
+
+case $cmd in
+  status) show_status; exit 0 ;;
+  destroy) destroy "$@"; exit 0 ;;
+esac
 
 files=(-f "$here/compose.yml")
 
@@ -184,7 +268,7 @@ compose() {
 # Die geteilten Volumes sind in compose.yml external und werden hier angelegt.
 compose_up() {
   local volume
-  for volume in devdock-atuin devdock-cache devdock-gh; do
+  for volume in "${shared_volumes[@]}"; do
     docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
   done
   compose up -d "$@"
