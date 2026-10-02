@@ -5,7 +5,8 @@
 #   devdock [-w DIR] tmux           ... tmux-Session "devdock" öffnen bzw. wieder anhängen
 #   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
 #   devdock [-w DIR] up|down|ps|logs|config
-#   devdock build                   Image neu bauen (Basis-Image frisch ziehen)
+#   devdock build [--upgrade]       Image neu bauen (Basis-Image frisch ziehen)
+#                                   (--upgrade holt die mise-Tools neu)
 #   devdock status                  Image und alle Container mit online/offline
 #   devdock destroy [-y] [--volumes]  alle Container und das Image löschen
 #                                   (--volumes auch die geteilten Volumes)
@@ -291,6 +292,19 @@ compose_up() {
   compose up -d "$@"
 }
 
+# --upgrade baut ab dem mise-Layer neu und holt so die latest-Versionen, ohne
+# dass apt-Pakete und Basis-Setup aus dem Cache fallen wie bei --no-cache.
+build_image() {
+  local arg args=()
+  for arg in "$@"; do
+    case $arg in
+      --upgrade) args+=(--build-arg "MISE_UPGRADE=$(date +%s)") ;;
+      *) args+=("$arg") ;;
+    esac
+  done
+  compose build --pull "${args[@]}"
+}
+
 # Terminals wie Ghostty oder kitty haben eigene terminfo-Einträge, die Ubuntu
 # nicht kennt. Fehlt der Eintrag im Container, wird er vom Host übertragen
 # (landet in ~/.terminfo); klappt das nicht, gilt xterm-256color.
@@ -325,7 +339,7 @@ case $cmd in
     [[ $# -gt 0 ]] || die "exec braucht ein Kommando"
     in_container "$@"
     ;;
-  build) compose build --pull "$@" ;;
+  build) build_image "$@" ;;
   up) compose_up "$@" ;;
   down) compose down "$@" ;;
   ps) compose ps "$@" ;;

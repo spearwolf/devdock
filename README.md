@@ -16,6 +16,7 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 
 ```bash
 ./devdock build              # Image bauen (einmalig bzw. für Updates)
+./devdock build --upgrade    # dito, mise-Tools auf die neuesten Versionen
 ./devdock                    # Container fürs aktuelle Verzeichnis, Login-Shell
 ./devdock -w ~/code/foo tmux # tmux-Session im Workspace ~/code/foo
 ./devdock exec pnpm test     # einzelnes Kommando
@@ -69,7 +70,7 @@ Technisch wird das Verzeichnis eingebunden, nicht die Datei, und `GIT_CONFIG_GLO
 
 `delta` ist installiert, damit `core.pager` und `interactive.diffFilter` funktionieren. `gh` liegt zusätzlich unter `/usr/bin/gh`, weil der Credential-Helper diesen festen Pfad aufruft. Die Anmeldung läuft entweder über `GH_TOKEN` in `.env` oder einmalig über `gh auth login` im Container (das Token landet dann im Volume `devdock-gh`).
 
-Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit `/login` im Container, alternativ per `ANTHROPIC_API_KEY` in `.env`. `CLAUDE_CONFIG_DIR` zeigt auf `~/.claude`, damit auch die `.claude.json` im Volume `devdock-claude` landet und nicht im flüchtigen Home. Der eingebaute Auto-Updater ist abgeschaltet (`DISABLE_AUTOUPDATER=1`), neue Versionen bringt `./devdock build` wie bei allen mise-Tools.
+Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit `/login` im Container, alternativ per `ANTHROPIC_API_KEY` in `.env`. `CLAUDE_CONFIG_DIR` zeigt auf `~/.claude`, damit auch die `.claude.json` im Volume `devdock-claude` landet und nicht im flüchtigen Home. Der eingebaute Auto-Updater ist abgeschaltet (`DISABLE_AUTOUPDATER=1`), neue Versionen bringt `./devdock build --upgrade` wie bei allen mise-Tools.
 
 ## Umgebungsvariablen
 
@@ -78,5 +79,5 @@ Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit 
 ## Hinweise
 
 - Beim ersten `git clone git@github.com:…` fragt ssh nach dem Host-Key, weil im Container keine `known_hosts` existiert. Ohne SSH-Agent geht Git über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
-- `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird; erzwingen lässt sich das mit `./devdock build --no-cache`.
+- `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird. `./devdock build --upgrade` erzwingt das ab dem mise-Layer; apt-Pakete und Basis-Setup bleiben im Cache. Danach baut Docker allerdings auch die späteren Layer neu (Playwright-Deps, Neovim-Plugins). `--no-cache` baut alles neu.
 - `config/` ist read-only unter `/opt/devdock/config` gemountet, `~/.config/starship.toml` ist ein Symlink darauf. Änderungen an `config/starship.toml` greifen ohne Rebuild beim nächsten Prompt.

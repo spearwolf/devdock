@@ -67,9 +67,13 @@ RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude
 # speichern per rename, und ein Datei-Bind-Mount sähe danach den alten Inode.
 RUN ln -s /opt/devdock/config/starship.toml ~/.config/starship.toml
 
+# Cache-Buster für "devdock build --upgrade": ein neuer Wert lässt den Cache ab
+# hier verfallen, mise holt dann die aktuellen latest-Versionen.
+ARG MISE_UPGRADE=
 COPY --chown=${USER_UID}:${USER_GID} config/mise.toml /home/${USERNAME}/.config/mise/config.toml
 RUN <<EOF
 set -eux
+echo "mise upgrade: ${MISE_UPGRADE:-nein}"
 mise install --yes
 mise reshim
 # Die Host-.gitconfig ruft "/usr/bin/gh auth git-credential" mit festem Pfad auf
