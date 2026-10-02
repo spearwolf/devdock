@@ -42,11 +42,17 @@ services:
       - gh:/home/${DEVDOCK_USER}/.config/gh
 
 # Feste Namen: alle Workspaces teilen sich Shell-History, Caches (pnpm-Store,
-# Go-Build-Cache, Playwright-Browser) und den gh-Login.
+# Go-Build-Cache, Playwright-Browser) und den gh-Login. external, weil jeder
+# Workspace ein eigenes Compose-Projekt ist und keines die Volumes besitzen soll;
+# ./devdock legt sie an. Leer gemountet übernehmen sie trotzdem Inhalt und
+# Ownership aus dem Image.
 volumes:
   atuin:
     name: devdock-atuin
+    external: true
   cache:
     name: devdock-cache
+    external: true
   gh:
     name: devdock-gh
+    external: true

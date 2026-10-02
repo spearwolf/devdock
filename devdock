@@ -190,12 +190,38 @@ compose() {
   docker compose --project-directory "$here" -p "$project" "${files[@]}" "$@"
 }
 
+# Die geteilten Volumes sind in compose.yml external und werden hier angelegt.
+compose_up() {
+  local volume
+  for volume in devdock-atuin devdock-cache devdock-gh; do
+    docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
+  done
+  compose up -d "$@"
+}
+
+# Terminals wie Ghostty oder kitty haben eigene terminfo-Einträge, die Ubuntu
+# nicht kennt. Fehlt der Eintrag im Container, wird er vom Host übertragen
+# (landet in ~/.terminfo); klappt das nicht, gilt xterm-256color.
+container_term() {
+  local term=${TERM:-xterm-256color} entry
+  entry=$(infocmp -x "$term" 2>/dev/null || true)
+  if printf '%s\n' "$entry" | compose exec -T dev sh -c \
+    'infocmp "$1" >/dev/null 2>&1 || { tic -x - >/dev/null 2>&1; infocmp "$1" >/dev/null 2>&1; }' \
+    sh "$term"; then
+    echo "$term"
+  else
+    note "terminfo für $term fehlt im Container, nutze xterm-256color"
+    echo xterm-256color
+  fi
+}
+
 in_container() {
-  local tty=()
+  local tty=() term
   [[ -t 0 && -t 1 ]] || tty=(-T)
-  compose up -d
+  compose_up
+  term=$(container_term)
   compose exec "${tty[@]}" \
-    -e TERM="${TERM:-xterm-256color}" \
+    -e TERM="$term" \
     -e COLORTERM="${COLORTERM:-truecolor}" \
     dev "$@"
 }
@@ -208,7 +234,7 @@ case $cmd in
     in_container "$@"
     ;;
   build) compose build --pull "$@" ;;
-  up) compose up -d "$@" ;;
+  up) compose_up "$@" ;;
   down) compose down "$@" ;;
   ps) compose ps "$@" ;;
   logs) compose logs "$@" ;;
