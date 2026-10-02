@@ -1,0 +1,8 @@
+# Render-Nodes für GPU-beschleunigte GUI-Anwendungen (Chromium, WebGL/WebGPU).
+services:
+  dev:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${DEVDOCK_VIDEO_GID}"
+      - "${DEVDOCK_RENDER_GID}"

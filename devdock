@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# devdock — Dev-Container für ein Workspace-Verzeichnis starten und betreten.
+#
+#   devdock [-w DIR] [shell]        Container starten (falls nötig), Login-Shell öffnen
+#   devdock [-w DIR] tmux           ... tmux-Session "devdock" öffnen bzw. wieder anhängen
+#   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
+#   devdock [-w DIR] up|down|ps|logs|config
+#   devdock build                   Image neu bauen (Basis-Image frisch ziehen)
+#   devdock gitconfig               ./gitconfig aus der Host-Config erzeugen (danach read/write)
+#
+# DIR ist per Default das aktuelle Verzeichnis. Pro Workspace läuft ein eigener
+# Container; alle teilen sich das Image devdock:latest und die Volumes
+# devdock-atuin, devdock-cache und devdock-gh. Variablen aus ./.env landen im
+# Container (Vorlage: .env.example).
+set -euo pipefail
+
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+die() { echo "devdock: $*" >&2; exit 1; }
+note() { echo "devdock: $*" >&2; }
+
+usage() {
+  sed -n '2,/^[^#]/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+}
+
+workspace=$PWD
+while getopts ':w:h' opt; do
+  case $opt in
+    w) workspace=$OPTARG ;;
+    h) usage; exit 0 ;;
+    :) die "-$OPTARG braucht ein Verzeichnis" ;;
+    *) die "unbekannte Option -$OPTARG (siehe devdock -h)" ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+cmd=${1:-shell}
+[[ $# -gt 0 ]] && shift
+
+[[ -d $workspace ]] || die "Workspace '$workspace' ist kein Verzeichnis"
+workspace=$(readlink -f "$workspace")
+
+export DEVDOCK_USER DEVDOCK_UID DEVDOCK_GID DEVDOCK_WORKSPACE
+DEVDOCK_USER=$(id -un)
+DEVDOCK_UID=$(id -u)
+DEVDOCK_GID=$(id -g)
+DEVDOCK_WORKSPACE=$workspace
+
+# --- Host-Docker-Daemon ------------------------------------------------------
+
+docker_sock=/var/run/docker.sock
+if [[ ${DOCKER_HOST:-} == unix://* ]]; then
+  docker_sock=${DOCKER_HOST#unix://}
+fi
+[[ -S $docker_sock ]] || die "Docker-Socket $docker_sock nicht gefunden"
+export DEVDOCK_DOCKER_SOCK=$docker_sock
+export DEVDOCK_DOCKER_GID
+DEVDOCK_DOCKER_GID=$(stat -c %g "$docker_sock")
+
+files=(-f "$here/compose.yml")
+
+# --- SSH-Agent ---------------------------------------------------------------
+
+if [[ -n ${SSH_AUTH_SOCK:-} && -S $SSH_AUTH_SOCK ]]; then
+  export DEVDOCK_SSH_AUTH_SOCK
+  DEVDOCK_SSH_AUTH_SOCK=$(readlink -f "$SSH_AUTH_SOCK")
+  files+=(-f "$here/compose.ssh.yml")
+else
+  note "kein SSH-Agent gefunden (SSH_AUTH_SOCK), starte ohne"
+fi
+
+# --- Wayland + GPU -----------------------------------------------------------
+
+if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
+  wayland_sock=$WAYLAND_DISPLAY
+  [[ $wayland_sock == /* ]] || wayland_sock="${XDG_RUNTIME_DIR:-/run/user/$DEVDOCK_UID}/$wayland_sock"
+  if [[ -S $wayland_sock ]]; then
+    export DEVDOCK_WAYLAND_SOCKET=$wayland_sock
+    files+=(-f "$here/compose.wayland.yml")
+
+    render_node=$(compgen -G '/dev/dri/renderD*' | head -n1 || true)
+    card_node=$(compgen -G '/dev/dri/card*' | head -n1 || true)
+    if [[ -n $render_node ]]; then
+      export DEVDOCK_RENDER_GID DEVDOCK_VIDEO_GID
+      DEVDOCK_RENDER_GID=$(stat -c %g "$render_node")
+      DEVDOCK_VIDEO_GID=$(stat -c %g "${card_node:-$render_node}")
+      files+=(-f "$here/compose.gpu.yml")
+    fi
+  else
+    note "Wayland-Socket $wayland_sock nicht gefunden, starte ohne GUI"
+  fi
+fi
+
+# --- tmux-Config -------------------------------------------------------------
+
+tmux_dir="${XDG_CONFIG_HOME:-$HOME/.config}/tmux"
+export DEVDOCK_TMUX_CONF_SRC DEVDOCK_TMUX_CONF_DST
+if [[ -f $tmux_dir/tmux.conf ]]; then
+  DEVDOCK_TMUX_CONF_SRC=$(readlink -f "$tmux_dir")
+  DEVDOCK_TMUX_CONF_DST="/home/$DEVDOCK_USER/.config/tmux"
+  files+=(-f "$here/compose.tmux.yml")
+elif [[ -f $HOME/.tmux.conf ]]; then
+  DEVDOCK_TMUX_CONF_SRC=$(readlink -f "$HOME/.tmux.conf")
+  DEVDOCK_TMUX_CONF_DST="/home/$DEVDOCK_USER/.tmux.conf"
+  files+=(-f "$here/compose.tmux.yml")
+fi
+
+# --- Git-Config --------------------------------------------------------------
+#
+# 1. ./gitconfig im devdock-Verzeichnis existiert → read/write, gehört dem Container.
+# 2. sonst → die übertragbaren Teile der globalen Host-Config, read-only und bei
+#    jedem Start frisch aus dem Host erzeugt (.devdock/host.gitconfig).
+#
+# Gemountet wird jeweils das Verzeichnis, nicht die Datei: git schreibt per
+# Lockfile + rename, und ein rename auf einen Datei-Bind-Mount scheitert.
+
+# Whitelist: was ohne Host-Pfade, Keys und Signing im Container sinnvoll ist.
+# Credential-Helper nur, wenn es der gh-Helper ist (gh liegt im Image unter
+# /usr/bin/gh); ein leerer Wert setzt die Helper-Liste zurück und bleibt.
+portable_git_key() {
+  local key=$1 value=$2
+  case $key in
+    credential.*) [[ -z $value || $value == *"gh auth git-credential"* ]] ;;
+    user.name | user.email | init.defaultbranch | interactive.difffilter) ;;
+    core.pager | core.autocrlf | core.whitespace | core.quotepath) ;;
+    commit.verbose | tag.sort | column.ui | help.autocorrect) ;;
+    alias.* | delta.* | color.* | diff.* | merge.* | pull.* | push.* | fetch.*) ;;
+    rebase.* | rerere.* | status.* | log.* | branch.* | advice.* | filter.lfs.*) ;;
+    github.* | url.*.insteadof | url.*.pushinsteadof) ;;
+    *) return 1 ;;
+  esac
+}
+
+# Schreibt die übertragbaren Teile der globalen Host-Config nach $1. Der Inhalt
+# wird per cat übertragen, damit die Zieldatei ihren Inode behält.
+write_portable_gitconfig() {
+  local out=$1 tmp entry key value
+  tmp=$(mktemp)
+  while IFS= read -r -d '' entry; do
+    key=${entry%%$'\n'*}
+    value=true
+    [[ $entry == *$'\n'* ]] && value=${entry#*$'\n'}
+    portable_git_key "$key" "$value" || continue
+    git config --file "$tmp" --add "$key" "$value"
+  done < <(git config --global --includes --list -z 2>/dev/null || true)
+  cat "$tmp" > "$out"
+  rm -f "$tmp"
+}
+
+if [[ $cmd == gitconfig ]]; then
+  [[ -e $here/gitconfig ]] && die "$here/gitconfig existiert schon"
+  command -v git >/dev/null || die "git fehlt auf dem Host"
+  write_portable_gitconfig "$here/gitconfig"
+  note "$here/gitconfig aus der Host-Config erzeugt, wird ab jetzt read/write gemountet"
+  exit 0
+fi
+
+export DEVDOCK_GITCONFIG_DIR DEVDOCK_GITCONFIG_FILE DEVDOCK_GITCONFIG_MODE
+if [[ -f $here/gitconfig ]]; then
+  DEVDOCK_GITCONFIG_DIR=$here
+  DEVDOCK_GITCONFIG_FILE=gitconfig
+  DEVDOCK_GITCONFIG_MODE=rw
+  files+=(-f "$here/compose.gitconfig.yml")
+elif command -v git >/dev/null && git config --global --list >/dev/null 2>&1; then
+  mkdir -p "$here/.devdock"
+  write_portable_gitconfig "$here/.devdock/host.gitconfig"
+  DEVDOCK_GITCONFIG_DIR=$here/.devdock
+  DEVDOCK_GITCONFIG_FILE=host.gitconfig
+  DEVDOCK_GITCONFIG_MODE=ro
+  files+=(-f "$here/compose.gitconfig.yml")
+fi
+
+# Globale ignore-Liste des Hosts ($XDG_CONFIG_HOME/git/ignore)
+git_ignore="${XDG_CONFIG_HOME:-$HOME/.config}/git/ignore"
+if [[ -f $git_ignore ]]; then
+  export DEVDOCK_GIT_IGNORE
+  DEVDOCK_GIT_IGNORE=$(readlink -f "$git_ignore")
+  files+=(-f "$here/compose.git-ignore.yml")
+fi
+
+# --- Compose -----------------------------------------------------------------
+
+# Projektname aus Verzeichnisname + Pfad-Hash: gleichnamige Ordner kollidieren nicht
+slug=$(basename "$workspace")
+slug=${slug,,}
+slug=${slug//[^a-z0-9]/-}
+project="devdock-${slug}-$(printf %s "$workspace" | sha1sum | cut -c1-6)"
+
+compose() {
+  docker compose --project-directory "$here" -p "$project" "${files[@]}" "$@"
+}
+
+in_container() {
+  local tty=()
+  [[ -t 0 && -t 1 ]] || tty=(-T)
+  compose up -d
+  compose exec "${tty[@]}" \
+    -e TERM="${TERM:-xterm-256color}" \
+    -e COLORTERM="${COLORTERM:-truecolor}" \
+    dev "$@"
+}
+
+case $cmd in
+  shell) in_container bash -l ;;
+  tmux) in_container tmux new-session -A -s devdock ;;
+  exec)
+    [[ $# -gt 0 ]] || die "exec braucht ein Kommando"
+    in_container "$@"
+    ;;
+  build) compose build --pull "$@" ;;
+  up) compose up -d "$@" ;;
+  down) compose down "$@" ;;
+  ps) compose ps "$@" ;;
+  logs) compose logs "$@" ;;
+  config) compose config "$@" ;;
+  *) die "unbekanntes Kommando '$cmd' (siehe devdock -h)" ;;
+esac

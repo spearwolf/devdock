@@ -1,0 +1,18 @@
+# Globale mise-Tools im Container (~/.config/mise/config.toml)
+[tools]
+node = "26"
+pnpm = "12"
+go = "latest"
+rust = "latest"
+
+# Neovim ≥ 0.12 wird für vim.pack gebraucht — apt ist dafür zu träge
+neovim = "latest"
+tree-sitter = "latest"
+"npm:neovim" = "latest"
+
+delta = "latest"
+gh = "latest"
+lazygit = "latest"
+lazydocker = "latest"
+atuin = "latest"
+opencode = "latest"

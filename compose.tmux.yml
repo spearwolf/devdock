@@ -1,0 +1,5 @@
+# tmux-Config des Hosts, read-only. Je nach Host ~/.config/tmux oder ~/.tmux.conf.
+services:
+  dev:
+    volumes:
+      - ${DEVDOCK_TMUX_CONF_SRC}:${DEVDOCK_TMUX_CONF_DST}:ro

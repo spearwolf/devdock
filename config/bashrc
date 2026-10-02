@@ -1,0 +1,16 @@
+# devdock: Shell-Setup im Container, wird aus ~/.bashrc gesourct
+
+export EDITOR=nvim
+export VISUAL=nvim
+
+eval "$(mise activate bash)"
+
+alias vim=nvim
+alias lg=lazygit
+alias lzd=lazydocker
+
+# atuin braucht bash-preexec, und das will als Letztes geladen werden
+if [[ -f ~/.bash-preexec.sh ]]; then
+  source ~/.bash-preexec.sh
+fi
+eval "$(atuin init bash)"

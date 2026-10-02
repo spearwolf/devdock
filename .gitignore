@@ -1,0 +1,4 @@
+# Lokale Einstellungen, gehören nicht ins Repo
+.env
+gitconfig
+.devdock/

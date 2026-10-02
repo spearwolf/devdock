@@ -1,0 +1,12 @@
+# GUI-Anwendungen im Container zeichnen direkt auf den Wayland-Compositor des Hosts.
+services:
+  dev:
+    environment:
+      WAYLAND_DISPLAY: wayland-0
+      XDG_SESSION_TYPE: wayland
+      GDK_BACKEND: wayland,x11
+      QT_QPA_PLATFORM: wayland;xcb
+      MOZ_ENABLE_WAYLAND: "1"
+      ELECTRON_OZONE_PLATFORM_HINT: auto
+    volumes:
+      - ${DEVDOCK_WAYLAND_SOCKET}:/run/user/${DEVDOCK_UID}/wayland-0

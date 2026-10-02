@@ -1,0 +1,52 @@
+# Basis des Dev-Containers. Gestartet wird über ./devdock — das Script setzt die
+# DEVDOCK_*-Variablen und hängt je nach Host die Overlays an:
+#   compose.ssh.yml         SSH-Agent des Hosts
+#   compose.wayland.yml     Wayland-Display des Hosts
+#   compose.gpu.yml         /dev/dri für hardwarebeschleunigtes Rendering
+#   compose.tmux.yml        tmux-Config des Hosts
+#   compose.gitconfig.yml   ./gitconfig (rw) oder gefilterte Host-Git-Config (ro)
+#   compose.git-ignore.yml  globale Git-ignore-Liste des Hosts
+
+services:
+  dev:
+    image: devdock:latest
+    build:
+      context: .
+      args:
+        USERNAME: ${DEVDOCK_USER:?bitte über ./devdock starten}
+        USER_UID: ${DEVDOCK_UID:?bitte über ./devdock starten}
+        USER_GID: ${DEVDOCK_GID:?bitte über ./devdock starten}
+    init: true
+    # Host-Netz: Dev-Server im Container sind auf dem Host unter localhost erreichbar
+    # und umgekehrt; kein Port-Mapping nötig.
+    network_mode: host
+    shm_size: 2gb
+    group_add:
+      - "${DEVDOCK_DOCKER_GID}"
+    # Lokale, gitignorte Variablen (Vorlage: .env.example)
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DEVDOCK: "1"
+      XDG_RUNTIME_DIR: /run/user/${DEVDOCK_UID}
+    # Workspace liegt im Container unter demselben Pfad wie auf dem Host. Nur so
+    # stimmen Bind-Mounts, die man von drinnen an den Host-Daemon schickt.
+    working_dir: ${DEVDOCK_WORKSPACE}
+    volumes:
+      - ${DEVDOCK_WORKSPACE}:${DEVDOCK_WORKSPACE}
+      - ${DEVDOCK_DOCKER_SOCK}:/var/run/docker.sock
+      - /etc/localtime:/etc/localtime:ro
+      - atuin:/home/${DEVDOCK_USER}/.local/share/atuin
+      - cache:/home/${DEVDOCK_USER}/.cache
+      - gh:/home/${DEVDOCK_USER}/.config/gh
+
+# Feste Namen: alle Workspaces teilen sich Shell-History, Caches (pnpm-Store,
+# Go-Build-Cache, Playwright-Browser) und den gh-Login.
+volumes:
+  atuin:
+    name: devdock-atuin
+  cache:
+    name: devdock-cache
+  gh:
+    name: devdock-gh

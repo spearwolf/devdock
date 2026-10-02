@@ -1,0 +1,10 @@
+# Globale Git-Config des Containers. ./devdock wählt die Quelle:
+#   ./gitconfig vorhanden → devdock-Verzeichnis, read/write
+#   sonst                 → .devdock/host.gitconfig (gefilterte Host-Config), read-only
+# Gemountet wird das Verzeichnis, weil git per Lockfile + rename schreibt.
+services:
+  dev:
+    environment:
+      GIT_CONFIG_GLOBAL: /opt/devdock-git/${DEVDOCK_GITCONFIG_FILE}
+    volumes:
+      - ${DEVDOCK_GITCONFIG_DIR}:/opt/devdock-git:${DEVDOCK_GITCONFIG_MODE}

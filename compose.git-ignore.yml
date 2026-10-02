@@ -1,0 +1,6 @@
+# Globale ignore-Liste des Hosts, read-only. git liest sie unabhängig von
+# GIT_CONFIG_GLOBAL aus $XDG_CONFIG_HOME/git/ignore.
+services:
+  dev:
+    volumes:
+      - ${DEVDOCK_GIT_IGNORE}:/home/${DEVDOCK_USER}/.config/git/ignore:ro

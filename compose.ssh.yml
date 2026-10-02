@@ -1,0 +1,7 @@
+# Nur der Agent-Socket des Hosts wandert in den Container — keine Keys, keine ~/.ssh.
+services:
+  dev:
+    environment:
+      SSH_AUTH_SOCK: /run/host-services/ssh-auth.sock
+    volumes:
+      - ${DEVDOCK_SSH_AUTH_SOCK}:/run/host-services/ssh-auth.sock
