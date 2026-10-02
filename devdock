@@ -144,6 +144,23 @@ esac
 
 files=(-f "$here/compose.yml")
 
+# --- SSH-Agent ---------------------------------------------------------------
+
+if [[ -n ${SSH_AUTH_SOCK:-} && -S $SSH_AUTH_SOCK ]]; then
+  export DEVDOCK_SSH_AUTH_SOCK
+  DEVDOCK_SSH_AUTH_SOCK=$(readlink -f "$SSH_AUTH_SOCK")
+  files+=(-f "$here/compose.ssh.yml")
+  # Ein leerer Agent fällt auf dem Host nicht auf, weil ssh dort direkt die Keys
+  # aus ~/.ssh nimmt. Im Container gibt es nur den Agent, ssh fragt nach dem Passwort.
+  agent_rc=0
+  ssh-add -l >/dev/null 2>&1 || agent_rc=$?
+  if [[ $agent_rc -eq 1 ]]; then
+    note "SSH-Agent hat keine Keys geladen, im Container fragt ssh nach dem Passwort (auf dem Host: ssh-add)"
+  fi
+else
+  note "kein SSH-Agent gefunden (SSH_AUTH_SOCK), starte ohne"
+fi
+
 # --- Wayland + GPU -----------------------------------------------------------
 
 if [[ -n ${WAYLAND_DISPLAY:-} ]]; then

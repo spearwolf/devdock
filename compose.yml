@@ -1,5 +1,6 @@
 # Basis des Dev-Containers. Gestartet wird über ./devdock — das Script setzt die
 # DEVDOCK_*-Variablen und hängt je nach Host die Overlays an:
+#   compose.ssh.yml         SSH-Agent des Hosts
 #   compose.wayland.yml     Wayland-Display des Hosts
 #   compose.gpu.yml         /dev/dri für hardwarebeschleunigtes Rendering
 #   compose.tmux.yml        tmux-Config des Hosts

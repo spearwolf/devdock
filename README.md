@@ -1,6 +1,6 @@
 # devdock
 
-Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon und das Wayland-Display des Hosts.
+Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SSH-Agent und das Wayland-Display des Hosts.
 
 ## Inhalt
 
@@ -37,6 +37,7 @@ Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadu
 | Overlay | Bedingung | Wirkung |
 | --- | --- | --- |
 | `compose.yml` | immer | Workspace, Docker-Socket (GID per `group_add`), Host-Netz, `/etc/localtime` |
+| `compose.ssh.yml` | `SSH_AUTH_SOCK` gesetzt | nur der Agent-Socket, kein `~/.ssh`, keine Keys |
 | `compose.wayland.yml` | `WAYLAND_DISPLAY` gesetzt | Wayland-Socket, Toolkit-Variablen für Wayland |
 | `compose.gpu.yml` | Wayland + `/dev/dri` vorhanden | Render-Nodes samt video/render-Gruppe |
 | `compose.tmux.yml` | `~/.config/tmux/tmux.conf` oder `~/.tmux.conf` | tmux-Config, read-only |
@@ -74,6 +75,6 @@ Technisch wird das Verzeichnis eingebunden, nicht die Datei, und `GIT_CONFIG_GLO
 
 ## Hinweise
 
-- Im Container gibt es weder SSH-Keys noch einen SSH-Agent. Git spricht mit GitHub über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
+- Beim ersten `git clone git@github.com:…` fragt ssh nach dem Host-Key, weil im Container keine `known_hosts` existiert. Ohne SSH-Agent geht Git über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
 - `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird; erzwingen lässt sich das mit `./devdock build --no-cache`.
 - `config/` ist read-only unter `/opt/devdock/config` gemountet, `~/.config/starship.toml` ist ein Symlink darauf. Änderungen an `config/starship.toml` greifen ohne Rebuild beim nächsten Prompt.
