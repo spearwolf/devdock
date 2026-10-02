@@ -51,11 +51,16 @@ USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
 ENV PNPM_HOME=/home/${USERNAME}/.local/share/pnpm
-ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/go/bin:/home/${USERNAME}/.local/bin:${PATH}
+ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/go/bin:/home/${USERNAME}/.bun/bin:/home/${USERNAME}/.local/bin:${PATH}
 
 # Volumes werden beim ersten Anlegen mit Inhalt und Ownership dieser Pfade
 # initialisiert — ohne sie gehörten atuin- und cache-Volume root.
 RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh
+
+# Die Starship-Config kommt live aus dem gemounteten config/ des devdock-Repos
+# (compose.yml). Gemountet wird das Verzeichnis, nicht die Datei: Editoren
+# speichern per rename, und ein Datei-Bind-Mount sähe danach den alten Inode.
+RUN ln -s /opt/devdock/config/starship.toml ~/.config/starship.toml
 
 COPY --chown=${USER_UID}:${USER_GID} config/mise.toml /home/${USERNAME}/.config/mise/config.toml
 RUN <<EOF

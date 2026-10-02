@@ -6,7 +6,7 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 
 | Quelle | Tools |
 | --- | --- |
-| mise (global, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, opencode |
+| mise (global, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, starship, zoxide, fzf, opencode, uv, bun |
 | apt | git, git-lfs, curl, jq, bat, mc, tmux, ripgrep, fd, build-essential, wl-clipboard |
 | `docker:cli`-Image | docker, docker compose, docker buildx (nur CLI, der Daemon ist der des Hosts) |
 
@@ -73,3 +73,4 @@ Technisch wird das Verzeichnis eingebunden, nicht die Datei, und `GIT_CONFIG_GLO
 
 - Beim ersten `git clone git@github.com:…` fragt ssh nach dem Host-Key, weil im Container keine `known_hosts` existiert.
 - `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird; erzwingen lässt sich das mit `./devdock build --no-cache`.
+- `config/` ist read-only unter `/opt/devdock/config` gemountet, `~/.config/starship.toml` ist ein Symlink darauf. Änderungen an `config/starship.toml` greifen ohne Rebuild beim nächsten Prompt.

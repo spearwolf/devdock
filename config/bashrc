@@ -9,8 +9,15 @@ alias vim=nvim
 alias lg=lazygit
 alias lzd=lazydocker
 
-# atuin braucht bash-preexec, und das will als Letztes geladen werden
+# bash-preexec muss vor starship und atuin geladen sein: Beide hängen sich dann
+# in precmd_functions/preexec_functions ein, statt sich gegenseitig die
+# DEBUG-Trap und PROMPT_COMMAND zu überschreiben.
 if [[ -f ~/.bash-preexec.sh ]]; then
   source ~/.bash-preexec.sh
 fi
-eval "$(atuin init bash)"
+
+eval "$(starship init bash)"
+
+eval "$(zoxide init --cmd cd bash)"
+
+eval "$(atuin init bash --disable-up-arrow)"
