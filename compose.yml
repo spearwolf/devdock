@@ -40,11 +40,12 @@ services:
       - atuin:/home/${DEVDOCK_USER}/.local/share/atuin
       - cache:/home/${DEVDOCK_USER}/.cache
       - gh:/home/${DEVDOCK_USER}/.config/gh
+      - claude:/home/${DEVDOCK_USER}/.claude
       # Configs aus dem devdock-Repo, im Image nach ~/.config verlinkt
       - ./config:/opt/devdock/config:ro
 
 # Feste Namen: alle Workspaces teilen sich Shell-History, Caches (pnpm-Store,
-# Go-Build-Cache, Playwright-Browser) und den gh-Login. external, weil jeder
+# Go-Build-Cache, Playwright-Browser), den gh-Login und den Claude-Code-Login. external, weil jeder
 # Workspace ein eigenes Compose-Projekt ist und keines die Volumes besitzen soll;
 # ./devdock legt sie an. Leer gemountet übernehmen sie trotzdem Inhalt und
 # Ownership aus dem Image.
@@ -57,4 +58,7 @@ volumes:
     external: true
   gh:
     name: devdock-gh
+    external: true
+  claude:
+    name: devdock-claude
     external: true

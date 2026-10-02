@@ -19,6 +19,7 @@ starship = "latest"
 zoxide = "latest"
 fzf = "latest"
 opencode = "latest"
+claude = "latest"
 
 uv = "latest"
 bun = "latest"

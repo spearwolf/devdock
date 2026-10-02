@@ -51,11 +51,16 @@ USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
 ENV PNPM_HOME=/home/${USERNAME}/.local/share/pnpm
+# Claude Code legt Login und Settings komplett in CLAUDE_CONFIG_DIR ab (auch die
+# sonst in ~ liegende .claude.json), damit das Volume devdock-claude alles fasst.
+# Updates kommen über mise beim Rebuild, nicht vom eingebauten Updater.
+ENV CLAUDE_CONFIG_DIR=/home/${USERNAME}/.claude \
+    DISABLE_AUTOUPDATER=1
 ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/go/bin:/home/${USERNAME}/.bun/bin:/home/${USERNAME}/.local/bin:${PATH}
 
 # Volumes werden beim ersten Anlegen mit Inhalt und Ownership dieser Pfade
-# initialisiert — ohne sie gehörten atuin- und cache-Volume root.
-RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh
+# initialisiert — ohne sie gehörten die Volumes root.
+RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude
 
 # Die Starship-Config kommt live aus dem gemounteten config/ des devdock-Repos
 # (compose.yml). Gemountet wird das Verzeichnis, nicht die Datei: Editoren
