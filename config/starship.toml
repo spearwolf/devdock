@@ -2,10 +2,26 @@
 
 command_timeout = 1000
 
+# Das container-Modul kennt bei Docker keinen Namen und zeigt nur "Docker".
+# Stattdessen den Workspace-Namen, den ./devdock als DEVDOCK_NAME mitgibt, an
+# derselben Stelle vor dem Prompt-Zeichen.
+format = '$all${env_var.DEVDOCK_NAME}$character'
+
 # Replace the '❯' symbol in the prompt
 [character]
-success_symbol = '[λ](bold blue)'
+success_symbol = '⚓'
 error_symbol = '💥'
+
+[container]
+disabled = true
+
+[env_var.DEVDOCK_NAME]
+symbol = '🐳 '
+format = '[$symbol{$env_value}]($style) '
+style = 'bold bright-blue'
+
+[directory]
+format = '💾 [$path]($style)[$read_only]($read_only_style) '
 
 [dotnet]
 disabled = true

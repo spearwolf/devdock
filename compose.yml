@@ -29,6 +29,8 @@ services:
         required: false
     environment:
       DEVDOCK: "1"
+      # Workspace-Name für den Starship-Prompt
+      DEVDOCK_NAME: ${DEVDOCK_NAME}
       XDG_RUNTIME_DIR: /run/user/${DEVDOCK_UID}
     # Workspace liegt im Container unter demselben Pfad wie auf dem Host. Nur so
     # stimmen Bind-Mounts, die man von drinnen an den Host-Daemon schickt.
