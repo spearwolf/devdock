@@ -17,8 +17,9 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 ```bash
 ./devdock build              # Image bauen (einmalig bzw. für Updates)
 ./devdock build --upgrade    # dito, mise-Tools auf die neuesten Versionen
-./devdock                    # Container fürs aktuelle Verzeichnis, Login-Shell
-./devdock -w ~/code/foo tmux # tmux-Session im Workspace ~/code/foo
+./devdock                    # Container fürs aktuelle Verzeichnis, tmux-Session
+./devdock -w ~/code/foo      # dito im Workspace ~/code/foo
+./devdock shell              # Login-Shell statt tmux
 ./devdock exec pnpm test     # einzelnes Kommando
 ./devdock down               # Container des Workspaces stoppen und entfernen
 ./devdock status             # Image und alle devdock-Container: online/offline

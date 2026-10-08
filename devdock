@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # devdock — Dev-Container für ein Workspace-Verzeichnis starten und betreten.
 #
-#   devdock [-w DIR] [shell]        Container starten (falls nötig), Login-Shell öffnen
-#   devdock [-w DIR] tmux           ... tmux-Session "devdock" öffnen bzw. wieder anhängen
+#   devdock [-w DIR] [tmux]         Container starten (falls nötig), tmux-Session
+#                                   "devdock" öffnen bzw. wieder anhängen
+#   devdock [-w DIR] shell          ... Login-Shell öffnen
 #   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
 #   devdock [-w DIR] up|down|ps|logs|config
 #   devdock build [--upgrade]       Image neu bauen (Basis-Image frisch ziehen)
@@ -38,7 +39,7 @@ while getopts ':w:h' opt; do
 done
 shift $((OPTIND - 1))
 
-cmd=${1:-shell}
+cmd=${1:-tmux}
 [[ $# -gt 0 ]] && shift
 
 [[ -d $workspace ]] || die "Workspace '$workspace' ist kein Verzeichnis"
