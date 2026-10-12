@@ -8,7 +8,7 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 | --- | --- |
 | mise (global, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, starship, zoxide, fzf, opencode, claude (Claude Code), uv, bun |
 | apt | git, git-lfs, curl, jq, bat, mc, tmux, ripgrep, fd, build-essential, wl-clipboard |
-| eigener Installer | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`) |
+| eigener Installer, optional | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`, Installation mit `install-hermes`) |
 | `docker:cli`-Image | docker, docker compose, docker buildx (nur CLI, der Daemon ist der des Hosts) |
 
 Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-next). Die Plugins und Mason-Tools sind schon beim Build installiert. Für Playwright-Browser sind die Systembibliotheken vorinstalliert, die Browser selbst nicht (siehe unten).
@@ -76,9 +76,9 @@ Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit 
 
 ## Hermes Agent
 
-[Hermes Agent](https://hermes-agent.nousresearch.com) installiert sich mit dem offiziellen Installer beim Build (ohne den Computer-Use-Treiber, der im Container nichts steuern könnte). Hermes verwaltet sich selbst: Checkout, eigenes Python, Node, Chromium und ffmpeg liegen zusammen mit Config, `.env`, Sessions, Memories und Skills in `~/.hermes`. Das ganze Verzeichnis ist deshalb das Volume `devdock-hermes`.
+[Hermes Agent](https://hermes-agent.nousresearch.com) ist nicht im Image. Er braucht rund 3 GB und eine lange Installation, deshalb bleibt er optional: `install-hermes` im Container ruft den offiziellen Installer auf (ohne den Computer-Use-Treiber, der im Container nichts steuern könnte). Weitere Optionen reicht das Script an den Installer durch, etwa `install-hermes --skip-browser`. Hermes verwaltet sich selbst: Checkout, eigenes Python, Node, Chromium und ffmpeg liegen zusammen mit Config, `.env`, Sessions, Memories und Skills in `~/.hermes`. Das ganze Verzeichnis ist deshalb das Volume `devdock-hermes`.
 
-Das Image befüllt das Volume nur, wenn es neu angelegt wird. Danach aktualisiert sich Hermes mit `hermes update` im Volume, ein Rebuild ändert an der installierten Version nichts. Eingerichtet wird einmalig mit `hermes setup` (Provider, API-Key), der Key landet in `~/.hermes/.env` im Volume. Das Messaging-Gateway lässt sich nicht als Dienst installieren (`hermes gateway install` braucht systemd), läuft aber mit `hermes gateway run` im Vordergrund, etwa in einem eigenen tmux-Fenster.
+Weil alle Workspaces das Volume teilen, wird nur einmal installiert. Ist Hermes schon da, verweist `install-hermes` auf `hermes update`, das ihn im Volume aktualisiert; ein Rebuild ändert an der installierten Version nichts. Die Befehle `hermes`, `hermes-acp` und `hermes-agent` bringt das Image als Launcher mit; ohne Installation melden sie nur, dass `install-hermes` fehlt. Eingerichtet wird einmalig mit `hermes setup` (Provider, API-Key), der Key landet in `~/.hermes/.env` im Volume. Das Messaging-Gateway lässt sich nicht als Dienst installieren (`hermes gateway install` braucht systemd), läuft aber mit `hermes gateway run` im Vordergrund, etwa in einem eigenen tmux-Fenster.
 
 ## Umgebungsvariablen
 

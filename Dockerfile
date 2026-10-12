@@ -60,24 +60,12 @@ ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME
 
 # Volumes werden beim ersten Anlegen mit Inhalt und Ownership dieser Pfade
 # initialisiert — ohne sie gehörten die Volumes root.
-RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude
+RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude ~/.hermes
 
 # Die Starship-Config kommt live aus dem gemounteten config/ des devdock-Repos
 # (compose.yml). Gemountet wird das Verzeichnis, nicht die Datei: Editoren
 # speichern per rename, und ein Datei-Bind-Mount sähe danach den alten Inode.
 RUN ln -s /opt/devdock/config/starship.toml ~/.config/starship.toml
-
-# Hermes Agent verwaltet sich selbst: Checkout, eigenes Python/Node/Chromium und
-# Nutzerdaten (Config, .env, Sessions, Memories) liegen alle in ~/.hermes, und
-# das ist das Volume devdock-hermes. Das Image befüllt es nur beim ersten
-# Anlegen; danach aktualisiert "hermes update" im Volume, nicht der Rebuild.
-# Deshalb steht dieser Layer vor dem mise-Cache-Buster.
-RUN <<EOF
-set -eux
-curl -fsSL -o /tmp/hermes-install.sh https://hermes-agent.nousresearch.com/install.sh
-bash /tmp/hermes-install.sh --non-interactive --skip-computer-use
-rm -rf /tmp/hermes-install.sh ~/.cache/uv ~/.npm ~/.hermes/cache/uv
-EOF
 
 # Cache-Buster für "devdock build --upgrade": ein neuer Wert lässt den Cache ab
 # hier verfallen, mise holt dann die aktuellen latest-Versionen.
@@ -115,5 +103,12 @@ git clone https://github.com/spearwolf/nvim-config-next ~/.config/nvim
 nvim --headless '+qa'
 nvim --headless -c 'MasonToolsInstallSync' -c 'qa'
 EOF
+
+# Hermes Agent ist optional: "install-hermes" installiert ihn im Container ins
+# Volume devdock-hermes (~/.hermes). Checkout, eigenes Python/Node/Chromium und
+# Nutzerdaten liegen dort zusammen, das Image bringt nur Installer-Script und
+# Launcher mit. Updates laufen über "hermes update", nicht über den Rebuild.
+COPY bin/install-hermes bin/hermes /usr/local/bin/
+RUN sudo ln -s hermes /usr/local/bin/hermes-acp && sudo ln -s hermes /usr/local/bin/hermes-agent
 
 CMD ["sleep", "infinity"]

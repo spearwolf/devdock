@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Installiert Hermes Agent mit dem offiziellen Installer ins Volume
+# devdock-hermes (~/.hermes). Alle Workspaces teilen sich das Volume, die
+# Installation ist also einmalig; danach aktualisiert "hermes update".
+#
+#   install-hermes [INSTALLER-OPTIONEN]   z. B. --skip-browser
+#
+# Ohne Computer-Use-Treiber, der im Container nichts steuern könnte.
+set -euo pipefail
+
+hermes_bin="$HOME/.hermes/hermes-agent/.hermes/bin/hermes"
+
+if [[ -x $hermes_bin ]]; then
+  echo "Hermes Agent ist schon installiert, aktualisiert wird mit: hermes update" >&2
+  exit 0
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+curl -fsSL -o "$tmp/install.sh" https://hermes-agent.nousresearch.com/install.sh
+
+# uv und npm cachen nach $tmp statt nach ~/.cache: das ist das Volume
+# devdock-cache, und dort blieben sonst einige hundert MB Downloads liegen.
+# Der Cache liegt dann auf einem anderen Dateisystem als ~/.hermes, Hardlinks
+# gehen nicht, also gleich kopieren statt erst zu warnen.
+UV_CACHE_DIR="$tmp/uv" UV_LINK_MODE=copy npm_config_cache="$tmp/npm" \
+  bash "$tmp/install.sh" --non-interactive --skip-computer-use "$@"
+rm -rf "$HOME/.hermes/cache/uv"
+
+echo
+echo "Hermes Agent ist installiert. Einrichten mit: hermes setup"
