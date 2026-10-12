@@ -94,6 +94,23 @@ Den MCP-Server startet die `.mcp.json`, die `ok init` ins Projekt schreibt. Ihr 
 
 Die Web-App startet im Projekt mit `ok init` und `ok start --no-open-browser` (im Container gibt es keinen Browser, den `ok` öffnen könnte). Durch das Host-Netz ist sie direkt im Browser des Hosts erreichbar.
 
+#### Autostart mit dem Container
+
+```bash
+ok activate          # Projekt eintragen und Server starten, Port: der erste freie ab 4700
+ok activate 4711     # dito auf festem Port, ändert auch den Port eines eingetragenen Projekts
+ok deactivate        # Projekt austragen und Server anhalten
+ok-autostart         # eingetragene Projekte mit URL und Zustand
+```
+
+`ok activate` sucht vom aktuellen Verzeichnis aufwärts bis zum Workspace das nächste Projekt mit `.ok/config.yml` und trägt es in `<workspace>/.devdock/ok-autostart` ein: eine Zeile pro Projekt, Port und Pfad relativ zum Workspace. Ein Workspace kann mehrere Projekte haben, auch verschachtelte. Beim Container-Start startet `devdock-entrypoint` alle eingetragenen Server mit `ok start --no-open-browser --idle-shutdown off --port …`; ohne `--idle-shutdown off` beendete sich ein Server nach 30 Minuten ohne offenen Tab. Legt `ok activate` das Verzeichnis `.devdock/` an, schreibt es ein `.gitignore` mit `*` hinein, damit es nicht in `git status` auftaucht.
+
+Die Registry liegt bewusst nicht in `<workspace>/.ok/config.yml`: Diese Datei macht den ganzen Workspace zum OpenKnowledge-Projekt, und `ok` in einem Unterverzeichnis ohne eigenes `.ok/` würde dann den ganzen Workspace als Projekt starten. Den Port setzt `ok-autostart` per `--port` und nicht über die Variable `PORT`, die auch Vite und andere Dev-Server lesen. Weil alle Container im Host-Netz laufen, muss der Port über alle Workspaces hinweg frei sein. `ok activate` prüft das für die laufenden Container; ein gestoppter Container, der denselben Port eingetragen hat, fällt erst bei seinem nächsten Start auf (`Port … ist belegt` in `devdock logs`).
+
+Die interaktive Shell zeigt beim Start, welche Server auf welchem Port laufen. In tmux erscheint das nur im ersten Pane einer neuen Session. Die Ausgabe der Server landet in `$XDG_RUNTIME_DIR/ok-autostart/<port>.log`, Meldungen vom Container-Start in `devdock logs`.
+
+Der Entrypoint bleibt als Elternprozess stehen, damit er die Server beim Stoppen des Containers per SIGTERM anhält (`stop_grace_period: 30s`). Ohne das bliebe nach dem SIGKILL von Docker `.ok/local/server.lock` mit der PID des Servers im Projekt liegen. Im nächsten Container gehört diese PID womöglich einem anderen Prozess: `ok start` hielte das Lock dann für aktiv, und `ok stop` beendete den fremden Prozess. Aus demselben Grund entfernt `ok-autostart` beim Container-Start ein Lock, auf dessen Port nichts lauscht, und hält nur Server an, die es selbst gestartet hat. `activate` und `deactivate` sind Unterbefehle des Launchers `ok` und keine von OpenKnowledge. Bekäme OpenKnowledge eigene Befehle mit diesen Namen, wären sie hinter dem Launcher versteckt; `ok-autostart activate` funktioniert in jedem Fall.
+
 ## Umgebungsvariablen
 
 `cp .env.example .env` und ausfüllen. Alles aus `.env` landet als Umgebungsvariable im Container. `.env`, `gitconfig` und `.devdock/` sind gitignored.

@@ -17,6 +17,8 @@ services:
         USER_UID: ${DEVDOCK_UID:?bitte über ./devdock starten}
         USER_GID: ${DEVDOCK_GID:?bitte über ./devdock starten}
     init: true
+    # Zeit für devdock-entrypoint, die OpenKnowledge-Server sauber anzuhalten
+    stop_grace_period: 30s
     # Host-Netz: Dev-Server im Container sind auf dem Host unter localhost erreichbar
     # und umgekehrt; kein Port-Mapping nötig.
     network_mode: host
@@ -31,6 +33,8 @@ services:
       DEVDOCK: "1"
       # Workspace-Name für den Starship-Prompt
       DEVDOCK_NAME: ${DEVDOCK_NAME}
+      # Workspace-Wurzel, dort liegt .devdock/ok-autostart (ok activate)
+      DEVDOCK_WORKSPACE: ${DEVDOCK_WORKSPACE}
       XDG_RUNTIME_DIR: /run/user/${DEVDOCK_UID}
     # Workspace liegt im Container unter demselben Pfad wie auf dem Host. Nur so
     # stimmen Bind-Mounts, die man von drinnen an den Host-Daemon schickt.

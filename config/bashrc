@@ -21,3 +21,9 @@ eval "$(starship init bash)"
 eval "$(zoxide init --cmd cd bash)"
 
 eval "$(atuin init bash --disable-up-arrow)"
+
+# MOTD: welche OpenKnowledge-Server mit dem Container gestartet wurden (ok
+# activate). In tmux nur im ersten Pane einer neuen Session, nicht in jedem.
+if [[ -z ${TMUX:-} || $(tmux display -p '#{session_windows}#{window_panes}' 2>/dev/null) == 11 ]]; then
+  ok-autostart status
+fi

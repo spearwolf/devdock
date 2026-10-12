@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+# Startet OpenKnowledge-Server für Projekte im Workspace zusammen mit dem
+# Container, jedes auf seinem festen Port. Welche das sind, steht in
+# <workspace>/.devdock/ok-autostart: eine Zeile pro Projekt, erst der Port,
+# dann der Pfad relativ zum Workspace.
+#
+#   ok activate [PORT]      Projekt (hier oder darüber) eintragen und den
+#                           Server starten; ohne PORT der erste freie ab 4700
+#   ok deactivate           Projekt austragen und seinen Server anhalten
+#   ok-autostart [status]   eingetragene Projekte mit URL und Zustand (MOTD)
+#   ok-autostart boot       beim Container-Start, aus devdock-entrypoint
+#   ok-autostart shutdown   beim Container-Stopp, aus devdock-entrypoint
+set -euo pipefail
+
+die() { echo "ok-autostart: $*" >&2; exit 1; }
+note() { echo "ok-autostart: $*" >&2; }
+
+workspace=${DEVDOCK_WORKSPACE:-}
+registry=$workspace/.devdock/ok-autostart
+# Container-lokal: PID und Log jedes gestarteten Servers, benannt nach dem Port
+run_dir=${XDG_RUNTIME_DIR:-/tmp}/ok-autostart
+cli="$HOME/.addons/openknowledge/npm/lib/node_modules/@inkeep/open-knowledge/dist/cli.mjs"
+first_port=4700
+
+usage() {
+  sed -n '2,/^[^#]/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+}
+
+require_workspace() {
+  [[ -n $workspace ]] || die "DEVDOCK_WORKSPACE fehlt, der Container stammt von vor ok-autostart (neu starten: devdock down, dann devdock)"
+}
+
+# Eingetragene Projekte als "PORT<Tab>PFAD"; Kommentare und Leerzeilen fallen weg
+entries() {
+  [[ -f $registry ]] || return 0
+  local port rel
+  while read -r port rel; do
+    [[ $port =~ ^[0-9]+$ && -n $rel ]] && printf '%s\t%s\n' "$port" "$rel"
+  done < "$registry"
+  return 0
+}
+
+port_of() {
+  local port rel
+  while IFS=$'\t' read -r port rel; do
+    [[ $rel == "$1" ]] && { echo "$port"; return 0; }
+  done < <(entries)
+  return 1
+}
+
+# Alle Container laufen im Host-Netz, ss sieht also auch deren Ports
+listening() {
+  [[ -n $(ss -Hltn "sport = :$1") ]]
+}
+
+# PID des Servers auf Port $1, sofern ok-autostart ihn in diesem Container
+# gestartet hat und er noch läuft. PIDs aus dem Lock von OpenKnowledge fasst
+# das Script nie an: Sie können aus einem anderen Container stammen und hier
+# zu einem beliebigen anderen Prozess gehören.
+own_pid() {
+  local pid
+  pid=$(cat "$run_dir/$1.pid" 2>/dev/null) || return 1
+  [[ -r /proc/$pid/cmdline ]] || return 1
+  # Bis der Server steht, durchläuft die PID per exec mehrere Kommandos: die
+  # Subshell von ok-autostart, setsid, den Launcher ok und Node mit cli.mjs.
+  # Danach setzt OpenKnowledge den Prozesstitel "open-knowledge-server <Projekt>".
+  tr '\0' ' ' < "/proc/$pid/cmdline" \
+    | grep -qE '^open-knowledge-server |cli\.mjs start |(^| |/)ok(-autostart)? ' || return 1
+  echo "$pid"
+}
+
+# Projektwurzel: das nächste Verzeichnis mit .ok/config.yml, von hier aufwärts
+# bis zum Workspace
+project_root() {
+  local dir
+  dir=$(pwd -P)
+  [[ $dir == "$workspace" || $dir == "$workspace"/* ]] \
+    || die "$dir liegt nicht im Workspace $workspace"
+  while :; do
+    [[ -f $dir/.ok/config.yml ]] && { echo "$dir"; return 0; }
+    [[ $dir == "$workspace" ]] && die "kein OpenKnowledge-Projekt hier oder darüber im Workspace (erst ok init)"
+    dir=${dir%/*}
+  done
+}
+
+relpath() {
+  [[ $1 == "$workspace" ]] && echo . || echo "${1#"$workspace"/}"
+}
+
+free_port() {
+  local port=$first_port
+  while port_taken "$port" || listening "$port"; do
+    port=$((port + 1))
+  done
+  echo "$port"
+}
+
+port_taken() {
+  local port rel
+  while IFS=$'\t' read -r port rel; do
+    [[ $port == "$1" ]] && return 0
+  done < <(entries)
+  return 1
+}
+
+# Trägt Projekt $1 mit Port $2 ein; ohne Port wird es ausgetragen
+set_entry() {
+  local rel=$1 port=${2:-} dir=${registry%/*} p r tmp
+  if [[ ! -d $dir ]]; then
+    mkdir -p "$dir"
+    # .devdock/ ist lokaler Zustand des Containers und gehört nicht ins Repo
+    echo '*' > "$dir/.gitignore"
+  fi
+  tmp=$(mktemp "$registry.XXXXXX")
+  {
+    echo "# Von ok activate/deactivate verwaltet: Port, dann Projektpfad relativ zum Workspace"
+    while IFS=$'\t' read -r p r; do
+      [[ $r == "$rel" ]] || printf '%s %s\n' "$p" "$r"
+    done < <(entries)
+    if [[ -n $port ]]; then
+      printf '%s %s\n' "$port" "$rel"
+    fi
+  } > "$tmp"
+  mv "$tmp" "$registry"
+}
+
+start_server() {
+  local port=$1 dir=$2 log=$run_dir/$1.log
+  mkdir -p "$run_dir"
+  echo "--- $(date '+%F %T') ok start in $dir" >> "$log"
+  # setsid löst den Server vom Terminal: Er überlebt das tmux-Pane, aus dem
+  # "ok activate" kam. Weil die Subshell kein Gruppenführer ist, forkt setsid
+  # nicht, und $! bleibt die PID des Servers (ok und setsid machen exec).
+  (cd "$dir" && exec setsid ok start --no-open-browser --idle-shutdown off --port "$port") \
+    < /dev/null >> "$log" 2>&1 &
+  echo $! > "$run_dir/$port.pid"
+}
+
+# Hält die Server auf den übergebenen Ports an, die ok-autostart gestartet hat.
+# SIGTERM lässt OpenKnowledge ausstehende Änderungen sichern und sein Lock
+# freigeben; gewartet wird höchstens 20 Sekunden.
+stop_servers() {
+  local port pid pids=() i
+  for port; do
+    if pid=$(own_pid "$port"); then
+      kill -TERM "$pid" 2>/dev/null && pids+=("$pid")
+    fi
+    rm -f "$run_dir/$port.pid"
+  done
+  ((${#pids[@]})) || return 0
+  for ((i = 0; i < 100; i++)); do
+    any_alive "${pids[@]}" || return 0
+    sleep 0.2
+  done
+  note "Server nach 20 s noch nicht beendet: ${pids[*]}"
+}
+
+any_alive() {
+  local pid
+  for pid; do
+    [[ -d /proc/$pid ]] && return 0
+  done
+  return 1
+}
+
+# Wartet, bis der Server auf Port $1 lauscht oder sich beendet hat
+await_server() {
+  local port=$1 i
+  for ((i = 0; i < 120; i++)); do
+    if listening "$port"; then
+      echo "OpenKnowledge läuft: http://localhost:$port"
+      return 0
+    fi
+    own_pid "$port" > /dev/null || break
+    sleep 0.25
+  done
+  note "Server auf Port $port läuft nicht, Ende von $run_dir/$port.log:"
+  tail -n 8 "$run_dir/$port.log" >&2
+  return 1
+}
+
+activate() {
+  require_workspace
+  [[ -f $cli ]] || die "OpenKnowledge ist nicht installiert, installiert wird mit: install-openknowledge"
+  local dir rel port=${1:-} current p r
+  dir=$(project_root)
+  rel=$(relpath "$dir")
+  current=$(port_of "$rel" || true)
+  port=${port:-${current:-$(free_port)}}
+  [[ $port =~ ^[0-9]+$ ]] && ((port >= 1024 && port <= 65535)) \
+    || die "Port muss eine Zahl zwischen 1024 und 65535 sein"
+  while IFS=$'\t' read -r p r; do
+    [[ $p == "$port" && $r != "$rel" ]] && die "Port $port ist schon für $r eingetragen"
+  done < <(entries)
+
+  if [[ -n $current && $current != "$port" ]]; then
+    stop_servers "$current"
+  fi
+  if own_pid "$port" > /dev/null; then
+    set_entry "$rel" "$port"
+    echo "OpenKnowledge läuft schon: http://localhost:$port"
+    return 0
+  fi
+  listening "$port" && die "Port $port ist belegt"
+
+  set_entry "$rel" "$port"
+  echo "$rel startet ab jetzt mit dem Container auf Port $port"
+  start_server "$port" "$dir"
+  await_server "$port"
+}
+
+deactivate() {
+  require_workspace
+  local dir rel port
+  dir=$(project_root)
+  rel=$(relpath "$dir")
+  port=$(port_of "$rel") || die "$rel ist nicht eingetragen"
+  set_entry "$rel"
+  if own_pid "$port" > /dev/null; then
+    stop_servers "$port"
+    echo "$rel ausgetragen, Server auf Port $port angehalten"
+  else
+    echo "$rel ausgetragen"
+    if listening "$port"; then
+      note "auf Port $port läuft noch ein Server, den ok-autostart nicht gestartet hat (anhalten mit: ok stop)"
+    fi
+  fi
+}
+
+boot() {
+  [[ -n $workspace && -f $registry ]] || return 0
+  # PIDs aus einem früheren Lauf dieses Containers bedeuten jetzt nichts mehr
+  rm -f "$run_dir"/*.pid
+  if [[ ! -f $cli ]]; then
+    note "OpenKnowledge ist nicht installiert, kein Autostart (install-openknowledge)"
+    return 0
+  fi
+  local port rel dir lock lock_port
+  while IFS=$'\t' read -r port rel; do
+    dir=$workspace/$rel
+    [[ $rel == . ]] && dir=$workspace
+    if [[ ! -f $dir/.ok/config.yml ]]; then
+      note "$rel: kein OpenKnowledge-Projekt (mehr), übersprungen"
+      continue
+    fi
+    # Ein Lock, das schon beim Start des Containers da ist, stammt von einem
+    # Server, der nicht sauber beendet wurde, oder aus einem anderen Container.
+    # Lauscht auf seinem Port niemand, ist es verwaist. OpenKnowledge prüft nur,
+    # ob die PID darin lebt; im neuen Container gehört sie womöglich einem
+    # fremden Prozess, und ok start verweigerte dann den Start.
+    lock=$dir/.ok/local/server.lock
+    if [[ -f $lock ]]; then
+      lock_port=$(jq -r '.port // empty' "$lock" 2> /dev/null || true)
+      if [[ -n $lock_port ]] && listening "$lock_port"; then
+        note "$rel: läuft schon auf Port $lock_port (anderer Container?), übersprungen"
+        continue
+      fi
+      rm -f "$lock"
+    fi
+    if listening "$port"; then
+      note "$rel: Port $port ist belegt, übersprungen"
+      continue
+    fi
+    start_server "$port" "$dir"
+    note "$rel: gestartet auf http://localhost:$port"
+  done < <(entries)
+}
+
+shutdown() {
+  local port rel ports=()
+  while IFS=$'\t' read -r port rel; do
+    ports+=("$port")
+  done < <(entries)
+  # Auch Server, deren Eintrag inzwischen weg ist, haben noch ihre PID-Datei
+  for port in "$run_dir"/*.pid; do
+    [[ -f $port ]] && port=${port##*/} && ports+=("${port%.pid}")
+  done
+  ((${#ports[@]})) && stop_servers "${ports[@]}"
+  return 0
+}
+
+status() {
+  [[ -n $workspace && -f $registry ]] || return 0
+  local port rel state lines=()
+  while IFS=$'\t' read -r port rel; do
+    if [[ ! -f $cli ]]; then
+      state="(OpenKnowledge nicht installiert)"
+    elif own_pid "$port" > /dev/null; then
+      listening "$port" && state= || state="(startet)"
+    elif listening "$port"; then
+      state="(Port belegt, nicht von ok-autostart)"
+    else
+      state="(läuft nicht, Log: $run_dir/$port.log)"
+    fi
+    lines+=("$(printf '  http://localhost:%-5s  %s%s' "$port" "$rel" "${state:+ $state}")")
+  done < <(entries)
+  ((${#lines[@]})) || return 0
+  echo "OpenKnowledge:"
+  printf '%s\n' "${lines[@]}"
+}
+
+cmd=${1:-status}
+[[ $# -gt 0 ]] && shift
+case $cmd in
+  activate) activate "$@" ;;
+  deactivate) deactivate ;;
+  status) status ;;
+  boot) boot ;;
+  shutdown) shutdown ;;
+  -h | --help | help) usage ;;
+  *) die "unbekanntes Kommando '$cmd' (siehe ok-autostart --help)" ;;
+esac

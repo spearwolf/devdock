@@ -118,8 +118,10 @@ EOF
 # Optionale Tools installiert man im Container mit ihrem install-*-Script ins
 # Volume devdock-addons; das Image bringt nur die Scripts und Launcher mit.
 # Hermes Agent: Checkout, eigenes Python/Node/Chromium und Nutzerdaten in
-# ~/.hermes, Updates über "hermes update". OpenKnowledge: npm-Paket samt ~/.ok.
-COPY bin/install-hermes bin/hermes bin/install-openknowledge bin/ok /usr/local/bin/
+# ~/.hermes, Updates über "hermes update". OpenKnowledge: npm-Paket samt ~/.ok;
+# ok-autostart startet per "ok activate" eingetragene Projekte mit dem Container.
+COPY bin/install-hermes bin/hermes bin/install-openknowledge bin/ok bin/ok-autostart \
+  bin/devdock-entrypoint /usr/local/bin/
 RUN <<EOF
 set -eux
 sudo ln -s hermes /usr/local/bin/hermes-acp
@@ -131,4 +133,7 @@ sudo mkdir -p /opt/OpenKnowledge/resources/cli/bin
 sudo ln -s /usr/local/bin/ok /opt/OpenKnowledge/resources/cli/bin/ok.sh
 EOF
 
+# Der Entrypoint startet die eingetragenen OpenKnowledge-Server und hält sie
+# beim Stoppen des Containers wieder an.
+ENTRYPOINT ["devdock-entrypoint"]
 CMD ["sleep", "infinity"]

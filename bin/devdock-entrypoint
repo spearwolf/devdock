@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Entrypoint des Containers: startet die mit "ok activate" eingetragenen
+# OpenKnowledge-Server und danach das eigentliche Kommando (CMD). Er bleibt als
+# Elternprozess stehen, weil tini (init: true) ein SIGTERM nur an ihn
+# weiterreicht: So hält er die Server sauber an, bevor Docker nach
+# stop_grace_period SIGKILL schickt und ihre Locks liegen blieben.
+ok-autostart boot || echo "devdock-entrypoint: ok-autostart boot ist gescheitert" >&2
+
+"$@" &
+child=$!
+trap 'ok-autostart shutdown; kill -TERM "$child" 2>/dev/null' TERM INT
+wait "$child"
