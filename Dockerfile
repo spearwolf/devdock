@@ -52,15 +52,18 @@ WORKDIR /home/${USERNAME}
 
 ENV PNPM_HOME=/home/${USERNAME}/.local/share/pnpm
 # Claude Code legt Login und Settings komplett in CLAUDE_CONFIG_DIR ab (auch die
-# sonst in ~ liegende .claude.json), damit das Volume devdock-claude alles fasst.
+# sonst in ~ liegende .claude.json), damit das Volume devdock-home alles fasst.
 # Updates kommen über mise beim Rebuild, nicht vom eingebauten Updater.
 ENV CLAUDE_CONFIG_DIR=/home/${USERNAME}/.claude \
     DISABLE_AUTOUPDATER=1
-ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/go/bin:/home/${USERNAME}/.bun/bin:/home/${USERNAME}/.local/bin:${PATH}
+# Shims: erst die eigenen aus dem Volume (mise use -g, Projekt-Pins), dann die
+# des Images (mise install --system).
+ENV PATH=/home/${USERNAME}/.local/share/mise/shims:/usr/local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/go/bin:/home/${USERNAME}/.bun/bin:/home/${USERNAME}/.local/bin:${PATH}
 
-# Volumes werden beim ersten Anlegen mit Inhalt und Ownership dieser Pfade
-# initialisiert — ohne sie gehörten die Volumes root.
-RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude
+# Das Volume devdock-cache übernimmt beim ersten Anlegen die Ownership dieses
+# Pfads — ohne ihn gehörte es root. Die Unterverzeichnisse von devdock-home legt
+# ./devdock an.
+RUN mkdir -p ~/.cache
 
 # Optionale Tools teilen sich das Volume devdock-addons (~/.addons), je eines pro
 # Unterverzeichnis. Ihre gewohnten Pfade zeigen per Symlink dorthin. Ein neues
@@ -73,22 +76,22 @@ ln -s .addons/hermes ~/.hermes
 ln -s .addons/openknowledge/home ~/.ok
 EOF
 
-# Die Starship-Config kommt live aus dem gemounteten config/ des devdock-Repos
-# (compose.yml). Gemountet wird das Verzeichnis, nicht die Datei: Editoren
-# speichern per rename, und ein Datei-Bind-Mount sähe danach den alten Inode.
-RUN ln -s /opt/devdock/config/starship.toml ~/.config/starship.toml
-
+# Die Tools aus config/mise.toml gehören dem Image, nicht dem Home: mise
+# installiert sie in seine System-Ebene (/etc/mise, /usr/local/share/mise),
+# die das Volume über ~/.local nicht verdeckt. So bringt jeder Rebuild neue
+# Versionen mit. Installiert wird als devel, damit rustup wie bisher nach
+# ~/.rustup und ~/.cargo geht und nicht nach /root.
 # Cache-Buster für "devdock build --upgrade": ein neuer Wert lässt den Cache ab
 # hier verfallen, mise holt dann die aktuellen latest-Versionen.
 ARG MISE_UPGRADE=
-COPY --chown=${USER_UID}:${USER_GID} config/mise.toml /home/${USERNAME}/.config/mise/config.toml
+COPY config/mise.toml /etc/mise/config.toml
 RUN <<EOF
 set -eux
 echo "mise upgrade: ${MISE_UPGRADE:-nein}"
-mise install --yes
-mise reshim
+sudo install -d -o "${USER_UID}" -g "${USER_GID}" /usr/local/share/mise
+mise install --system --yes
 # Die Host-.gitconfig ruft "/usr/bin/gh auth git-credential" mit festem Pfad auf
-sudo ln -s "$HOME/.local/share/mise/shims/gh" /usr/bin/gh
+sudo ln -s /usr/local/share/mise/shims/gh /usr/bin/gh
 EOF
 
 COPY --chown=${USER_UID}:${USER_GID} config/bashrc /home/${USERNAME}/.bashrc.devdock
@@ -107,12 +110,19 @@ npx -y playwright@latest install-deps chromium firefox
 sudo rm -rf /var/lib/apt/lists/*
 EOF
 
-# Neovim-Config inkl. Plugins (vim.pack) und Mason-Tools vorinstallieren
+# Neovim-Config inkl. Plugins (vim.pack) und Mason-Tools vorinstallieren.
+# Danach wandert alles, was der Build in ~/.config und ~/.local hinterlassen
+# hat, in die Vorlage /opt/devdock/skel: Dort verdeckt das Volume devdock-home
+# es nicht, und devdock-entrypoint kopiert fehlende Einträge ins Volume. Das mv
+# steht im selben RUN wie Neovim, sonst läge dessen Inhalt (~360 MB) doppelt
+# im Image; spätere Schritte dürfen in beide Pfade nichts mehr schreiben.
 RUN <<EOF
 set -eux
 git clone https://github.com/spearwolf/nvim-config-next ~/.config/nvim
 nvim --headless '+qa'
 nvim --headless -c 'MasonToolsInstallSync' -c 'qa'
+sudo install -d -o "${USER_UID}" -g "${USER_GID}" /opt/devdock/skel
+mv ~/.config ~/.local /opt/devdock/skel/
 EOF
 
 # Optionale Tools installiert man im Container mit ihrem install-*-Script ins

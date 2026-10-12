@@ -15,7 +15,7 @@
 #
 # DIR ist per Default das aktuelle Verzeichnis. Pro Workspace läuft ein eigener
 # Container; alle teilen sich das Image devdock:latest und die Volumes
-# devdock-atuin, devdock-cache, devdock-gh, devdock-claude und devdock-addons.
+# devdock-home (~/.config, ~/.local, ~/.claude), devdock-cache und devdock-addons.
 # Variablen aus ./.env landen im Container (Vorlage: .env.example).
 set -euo pipefail
 
@@ -71,7 +71,7 @@ DEVDOCK_DOCKER_GID=$(stat -c %g "$docker_sock")
 # devdock-Container zu finden; den Workspace verrät ihr working_dir.
 
 image=devdock:latest
-shared_volumes=(devdock-atuin devdock-cache devdock-gh devdock-claude devdock-addons)
+shared_volumes=(devdock-home devdock-cache devdock-addons)
 
 devdock_containers() {
   docker ps -a --filter "label=com.docker.compose.project.working_dir=$here" "$@"
@@ -126,7 +126,7 @@ destroy() {
   echo "Gelöscht wird:"
   ((${#ids[@]})) && echo "  ${#ids[@]} Container (alle Workspaces, auch laufende)"
   ((has_image)) && echo "  Image $image"
-  ((${#existing[@]})) && echo "  Volumes ${existing[*]} (gh-Login, Shell-History, Caches)"
+  ((${#existing[@]})) && echo "  Volumes ${existing[*]} (Home samt gh- und Claude-Login, Caches, optionale Tools)"
 
   if ((!yes)); then
     [[ -t 0 ]] || die "destroy fragt nach; ohne Terminal nur mit -y"
@@ -285,9 +285,52 @@ compose() {
   docker compose --project-directory "$here" -p "$project" "${files[@]}" "$@"
 }
 
+# devdock-home ist per subpath eingebunden (compose.yml), und Docker verweigert
+# den Start, solange eines der Unterverzeichnisse fehlt. Das Volume entsteht
+# deshalb nur hier, gleich samt Unterverzeichnissen; scheitert das, wird es
+# wieder gelöscht. Dabei übernimmt es die Volumes des alten Layouts, die je
+# einen Pfad hielten (Volume:Ziel im Home-Volume); die bleiben unangetastet.
+legacy_volumes=(devdock-gh:config/gh devdock-claude:claude devdock-atuin:local/share/atuin)
+
+init_home_volume() {
+  local entry volume mounts=() migrated=()
+  for entry in "${legacy_volumes[@]}"; do
+    volume=${entry%%:*}
+    docker volume inspect "$volume" >/dev/null 2>&1 || continue
+    # Ein laufender Container schreibt womöglich gerade hinein (Claude Code)
+    [[ -z $(docker ps -q --filter "volume=$volume") ]] \
+      || die "$volume ist noch in einem laufenden Container eingebunden; erst dort ./devdock down"
+    mounts+=(-v "$volume:/legacy/$volume:ro")
+    migrated+=("$volume")
+  done
+  docker image inspect "$image" >/dev/null 2>&1 || build_image
+  docker volume create devdock-home >/dev/null
+  if ! docker run --rm --user 0 --entrypoint bash -v devdock-home:/home-volume "${mounts[@]}" \
+    "$image" -c '
+      set -euo pipefail
+      uid=$1 gid=$2
+      shift 2
+      cd /home-volume
+      mkdir -p config local claude
+      for entry; do
+        volume=${entry%%:*} target=${entry#*:}
+        [[ -d /legacy/$volume ]] || continue
+        mkdir -p "$target"
+        cp -a "/legacy/$volume/." "$target/"
+      done
+      chown -R "$uid:$gid" .
+    ' bash "$DEVDOCK_UID" "$DEVDOCK_GID" "${legacy_volumes[@]}"; then
+    docker volume rm devdock-home >/dev/null
+    die "devdock-home ließ sich nicht einrichten"
+  fi
+  ((${#migrated[@]} == 0)) && return 0
+  note "devdock-home hat ${migrated[*]} übernommen; nach einem Blick hinein können sie weg: docker volume rm ${migrated[*]}"
+}
+
 # Die geteilten Volumes sind in compose.yml external und werden hier angelegt.
 compose_up() {
   local volume
+  docker volume inspect devdock-home >/dev/null 2>&1 || init_home_volume
   for volume in "${shared_volumes[@]}"; do
     docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
   done

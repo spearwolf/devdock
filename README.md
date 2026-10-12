@@ -6,7 +6,7 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 
 | Quelle | Tools |
 | --- | --- |
-| mise (global, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, starship, zoxide, fzf, opencode, claude (Claude Code), uv, bun |
+| mise (Image, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, starship, zoxide, fzf, opencode, claude (Claude Code), uv, bun |
 | apt | git, git-lfs, curl, jq, bat, mc, tmux, ripgrep, fd, build-essential, wl-clipboard |
 | optional, per `install-*` im Container | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`, `install-hermes`), [OpenKnowledge](https://openknowledge.ai) (`ok`, `install-openknowledge`) |
 | `docker:cli`-Image | docker, docker compose, docker buildx (nur CLI, der Daemon ist der des Hosts) |
@@ -27,11 +27,31 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 ./devdock destroy            # alle devdock-Container und das Image löschen (fragt nach)
 ```
 
-`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen; die aktualisiert ein `./devdock down` mit anschließendem Neustart. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also gh- und Claude-Login, Shell-History und Caches). `-y` überspringt die Rückfrage.
+`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen; die aktualisiert ein `./devdock down` mit anschließendem Neustart. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also das Home samt gh- und Claude-Login und Shell-History, die Caches und die optionalen Tools). `-y` überspringt die Rückfrage.
 
 Wer `devdock` in den `PATH` verlinkt (`ln -s $PWD/devdock ~/.local/bin/`), kann es aus jedem Projekt heraus aufrufen.
 
-Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadurch funktionieren Bind-Mounts, die man von drinnen an den Host-Daemon schickt (`docker run -v $PWD:/src …`). Für jeden Workspace gibt es einen eigenen Container. Das Image `devdock:latest` und die Volumes `devdock-atuin` (Shell-History), `devdock-cache` (`~/.cache`: pnpm-Store, Go-Cache, Playwright-Browser) `devdock-gh` (`~/.config/gh`: der gh-Login), `devdock-claude` (`~/.claude`: Login, Settings und Verlauf von Claude Code) und `devdock-addons` (`~/.addons`: optionale Tools samt Daten, siehe unten) teilen sich alle.
+Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadurch funktionieren Bind-Mounts, die man von drinnen an den Host-Daemon schickt (`docker run -v $PWD:/src …`). Für jeden Workspace gibt es einen eigenen Container. Das Image `devdock:latest` und die Volumes `devdock-home` (das bleibende Home, siehe unten), `devdock-cache` (`~/.cache`: pnpm-Store, Go-Cache, Playwright-Browser) und `devdock-addons` (`~/.addons`: optionale Tools samt Daten, siehe unten) teilen sich alle.
+
+## Home-Volume
+
+`devdock-home` hält, was vom Home bleiben soll, je Pfad in einem eigenen Unterverzeichnis (Compose: `volume.subpath`):
+
+| Pfad | Unterverzeichnis | Inhalt, unter anderem |
+| --- | --- | --- |
+| `~/.config` | `config` | gh-Login, Starship, Neovim-Config, eigene mise-Tools |
+| `~/.local` | `local` | Shell-History (atuin), Neovim-Plugins und Mason-Tools, `~/.local/bin` |
+| `~/.claude` | `claude` | Login, Settings und Verlauf von Claude Code |
+
+Was der Build selbst in `~/.config` und `~/.local` anlegt (Neovim-Config samt Plugins und Mason-Tools, den pnpm-Store-Pfad), verdeckt das Volume. Das Image hält es deshalb unter `/opt/devdock/skel` bereit, und `devdock-entrypoint` kopiert beim Container-Start jeden Eintrag (`.config/nvim`, `.local/share/nvim`, …), der im Volume noch ganz fehlt. Danach gehört er dem Volume: Ein Rebuild ändert ihn nicht mehr, ein `git pull` in `~/.config/nvim` bleibt. Zurück auf den Stand des Images geht es mit `rm -rf ~/.config/nvim ~/.local/share/nvim` und einem neuen Container (`./devdock down`, dann `./devdock`). Ebenso einmalig landet `config/starship.toml` als `~/.config/starship.toml` im Volume und ist dort frei editierbar; spätere Änderungen im Repo erreichen sie nicht mehr.
+
+Die Tools aus `config/mise.toml` gehören dagegen dem Image. mise installiert sie in seine System-Ebene (`/etc/mise/config.toml`, `/usr/local/share/mise`), die das Volume nicht verdeckt, und jeder Rebuild bringt neue Versionen mit. `~/.config/mise/config.toml` gilt zusätzlich und ist für eigene Tools da (`mise use -g …`). Die landen wie die Versionen, die ein Projekt pinnt, in `~/.local/share/mise` und überleben damit `./devdock down`, für alle Workspaces. Eine Kopie von `config/mise.toml` gehört nicht dorthin: Sie bliebe nach einem Rebuild auf dem alten Stand, und mise installierte die alten Versionen nebenher ins Volume.
+
+Docker verweigert einen subpath-Mount, dessen Verzeichnis fehlt. `./devdock` legt das Volume deshalb selbst an, gleich samt Unterverzeichnissen. Gibt es dabei noch die Volumes des alten Layouts (`devdock-gh`, `devdock-claude`, `devdock-atuin`), übernimmt es deren Inhalt und lässt sie stehen; gelöscht werden sie von Hand. Ist eines davon noch in einem laufenden Container eingebunden, bricht es ab, bis der gestoppt ist.
+
+## Eigene Shell-Scripts pro Workspace
+
+`devdock-entrypoint` legt im Workspace `.devdock/bashrc.d/` an; ist `.devdock/` dabei neu, kommt ein `.gitignore` mit `*` hinein. Die interaktive Shell sourct alle Dateien darin in Namensreihenfolge, und zwar zuletzt, nach mise, Starship und atuin. So können die Scripts deren Aliase und Einstellungen überschreiben. Ein neues Script greift ab der nächsten Shell.
 
 ## Was vom Host kommt
 
@@ -70,9 +90,9 @@ Mit `./devdock gitconfig` wird die gefilterte Host-Fassung einmalig als `./gitco
 
 Technisch wird das Verzeichnis eingebunden, nicht die Datei, und `GIT_CONFIG_GLOBAL` zeigt auf die Datei darin. git schreibt nämlich über eine Lock-Datei und benennt sie danach um, und ein `rename` auf einen Datei-Bind-Mount scheitert. Im ersten Fall ist deshalb das devdock-Verzeichnis im Container unter `/opt/devdock-git` beschreibbar.
 
-`delta` ist installiert, damit `core.pager` und `interactive.diffFilter` funktionieren. `gh` liegt zusätzlich unter `/usr/bin/gh`, weil der Credential-Helper diesen festen Pfad aufruft. Die Anmeldung läuft entweder über `GH_TOKEN` in `.env` oder einmalig über `gh auth login` im Container (das Token landet dann im Volume `devdock-gh`).
+`delta` ist installiert, damit `core.pager` und `interactive.diffFilter` funktionieren. `gh` liegt zusätzlich unter `/usr/bin/gh`, weil der Credential-Helper diesen festen Pfad aufruft. Die Anmeldung läuft entweder über `GH_TOKEN` in `.env` oder einmalig über `gh auth login` im Container (das Token landet dann in `~/.config/gh` im Volume `devdock-home`).
 
-Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit `/login` im Container, alternativ per `ANTHROPIC_API_KEY` in `.env`. `CLAUDE_CONFIG_DIR` zeigt auf `~/.claude`, damit auch die `.claude.json` im Volume `devdock-claude` landet und nicht im flüchtigen Home. Der eingebaute Auto-Updater ist abgeschaltet (`DISABLE_AUTOUPDATER=1`), neue Versionen bringt `./devdock build --upgrade` wie bei allen mise-Tools.
+Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit `/login` im Container, alternativ per `ANTHROPIC_API_KEY` in `.env`. `CLAUDE_CONFIG_DIR` zeigt auf `~/.claude`, damit auch die `.claude.json` im Volume `devdock-home` landet und nicht im flüchtigen Home. Der eingebaute Auto-Updater ist abgeschaltet (`DISABLE_AUTOUPDATER=1`), neue Versionen bringt `./devdock build --upgrade` wie bei allen mise-Tools.
 
 ## Optionale Tools
 
@@ -119,4 +139,4 @@ Der Entrypoint bleibt als Elternprozess stehen, damit er die Server beim Stoppen
 
 - Beim ersten `git clone git@github.com:…` fragt ssh nach dem Host-Key, weil im Container keine `known_hosts` existiert. Ohne SSH-Agent geht Git über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
 - `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird. `./devdock build --upgrade` erzwingt das ab dem mise-Layer; apt-Pakete und Basis-Setup bleiben im Cache. Danach baut Docker allerdings auch die späteren Layer neu (Playwright-Deps, Neovim-Plugins). `--no-cache` baut alles neu.
-- `config/` ist read-only unter `/opt/devdock/config` gemountet, `~/.config/starship.toml` ist ein Symlink darauf. Änderungen an `config/starship.toml` greifen ohne Rebuild beim nächsten Prompt.
+- `config/` ist read-only unter `/opt/devdock/config` gemountet. Von dort kopiert `devdock-entrypoint` die Starship-Config einmalig ins Home-Volume.

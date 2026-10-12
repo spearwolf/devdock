@@ -1,8 +1,8 @@
 #!/bin/sh
 # Launcher für hermes, hermes-acp und hermes-agent (Symlinks auf diese Datei).
-# Der Installer legt dieselben Launcher nach ~/.local/bin, das liegt aber im
-# Container und nicht im Volume devdock-addons; nach dem Neuanlegen des
-# Containers übernehmen diese hier. Fehlt die Installation, sagen sie das.
+# Der Installer legt dieselben Launcher nach ~/.local/bin (Volume devdock-home),
+# die im PATH vorn stehen; diese hier greifen, wo jene fehlen, etwa auf einem
+# frischen Home. Fehlt die Installation, sagen sie das.
 bin="$HOME/.hermes/hermes-agent/.hermes/bin"
 
 case ${0##*/} in

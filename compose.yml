@@ -43,33 +43,43 @@ services:
       - ${DEVDOCK_WORKSPACE}:${DEVDOCK_WORKSPACE}
       - ${DEVDOCK_DOCKER_SOCK}:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
-      - atuin:/home/${DEVDOCK_USER}/.local/share/atuin
       - cache:/home/${DEVDOCK_USER}/.cache
-      - gh:/home/${DEVDOCK_USER}/.config/gh
-      - claude:/home/${DEVDOCK_USER}/.claude
+      # Das bleibende Home: ein Volume, je ein Unterverzeichnis pro Pfad. Was das
+      # Image hier mitbringt (Neovim samt Plugins, …), liegt unter
+      # /opt/devdock/skel und landet per devdock-entrypoint im Volume.
+      - type: volume
+        source: home
+        target: /home/${DEVDOCK_USER}/.config
+        volume:
+          subpath: config
+      - type: volume
+        source: home
+        target: /home/${DEVDOCK_USER}/.local
+        volume:
+          subpath: local
+      - type: volume
+        source: home
+        target: /home/${DEVDOCK_USER}/.claude
+        volume:
+          subpath: claude
       # Optionale Tools (install-hermes, install-openknowledge, …), je eines pro
       # Unterverzeichnis; ~/.hermes, ~/.ok usw. sind im Image dorthin verlinkt
       - addons:/home/${DEVDOCK_USER}/.addons
       # Configs aus dem devdock-Repo, im Image nach ~/.config verlinkt
       - ./config:/opt/devdock/config:ro
 
-# Feste Namen: alle Workspaces teilen sich Shell-History, Caches (pnpm-Store,
-# Go-Build-Cache, Playwright-Browser), den gh-Login, den Claude-Code-Login und
-# die optional installierten Tools samt Daten. external, weil jeder Workspace ein eigenes
-# Compose-Projekt ist und keines die Volumes besitzen soll; ./devdock legt sie
-# an. Leer gemountet übernehmen sie trotzdem Inhalt und Ownership aus dem Image.
+# Feste Namen: alle Workspaces teilen sich Caches (pnpm-Store, Go-Build-Cache,
+# Playwright-Browser), das Home (~/.config samt gh-Login, ~/.local samt
+# Shell-History, ~/.claude) und die optional installierten Tools samt Daten.
+# external, weil jeder Workspace ein eigenes Compose-Projekt ist und keines die
+# Volumes besitzen soll; ./devdock legt sie an, bei devdock-home samt den
+# Unterverzeichnissen, ohne die Docker einen subpath-Mount verweigert.
 volumes:
-  atuin:
-    name: devdock-atuin
-    external: true
   cache:
     name: devdock-cache
     external: true
-  gh:
-    name: devdock-gh
-    external: true
-  claude:
-    name: devdock-claude
+  home:
+    name: devdock-home
     external: true
   addons:
     name: devdock-addons

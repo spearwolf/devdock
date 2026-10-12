@@ -22,6 +22,16 @@ eval "$(zoxide init --cmd cd bash)"
 
 eval "$(atuin init bash --disable-up-arrow)"
 
+# Eigene Scripts des Workspaces: alle Dateien in <workspace>/.devdock/bashrc.d/
+# (legt devdock-entrypoint an), in Namensreihenfolge. Am Ende, damit sie
+# Aliase und Einstellungen von oben überschreiben können.
+if [[ -n ${DEVDOCK_WORKSPACE:-} ]]; then
+  for f in "$DEVDOCK_WORKSPACE"/.devdock/bashrc.d/*; do
+    [[ -f $f && -r $f ]] && source "$f"
+  done
+  unset f
+fi
+
 # MOTD: welche OpenKnowledge-Server mit dem Container gestartet wurden (ok
 # activate). In tmux nur im ersten Pane einer neuen Session, nicht in jedem.
 if [[ -z ${TMUX:-} || $(tmux display -p '#{session_windows}#{window_panes}' 2>/dev/null) == 11 ]]; then

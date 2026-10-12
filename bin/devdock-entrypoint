@@ -1,9 +1,47 @@
 #!/usr/bin/env bash
-# Entrypoint des Containers: startet die mit "ok activate" eingetragenen
-# OpenKnowledge-Server und danach das eigentliche Kommando (CMD). Er bleibt als
-# Elternprozess stehen, weil tini (init: true) ein SIGTERM nur an ihn
-# weiterreicht: So hält er die Server sauber an, bevor Docker nach
+# Entrypoint des Containers: richtet das Home im Volume devdock-home ein und das
+# Verzeichnis .devdock/ im Workspace, startet die mit "ok activate"
+# eingetragenen OpenKnowledge-Server und danach das eigentliche Kommando (CMD).
+# Er bleibt als Elternprozess stehen, weil tini (init: true) ein SIGTERM nur an
+# ihn weiterreicht: So hält er die Server sauber an, bevor Docker nach
 # stop_grace_period SIGKILL schickt und ihre Locks liegen blieben.
+
+skel=/opt/devdock/skel
+
+# Kopiert $1 nach $2, sofern dort noch nichts liegt. Erst unter einem
+# Zwischennamen, damit ein abgebrochener Start keine halbe Kopie hinterlässt,
+# die beim nächsten Mal als vorhanden gälte.
+seed() {
+  local src=$1 dst=$2 tmp
+  [[ -e $dst || -L $dst ]] && return 0
+  mkdir -p "${dst%/*}" || return
+  tmp="$dst.devdock-seed.$$"
+  cp -a "$src" "$tmp" && mv "$tmp" "$dst" || { rm -rf "$tmp"; return 1; }
+}
+
+# Was der Build in ~/.config und ~/.local angelegt hat (Neovim samt Plugins und
+# Mason-Tools, pnpm-Store-Pfad, …), kommt eintragsweise ins Volume: nur was dort
+# ganz fehlt. Danach gehört es dem Volume und bleibt über Rebuilds hinweg, wie
+# es ist; zurück auf den Stand des Images geht es per rm -rf und Neustart.
+for src in "$skel"/.config/* "$skel"/.local/*/*; do
+  [[ -e $src || -L $src ]] || continue
+  seed "$src" "$HOME/${src#"$skel"/}" || echo "devdock-entrypoint: ${src#"$skel"/} nicht übernommen" >&2
+done
+
+# Die Starship-Config kommt aus dem devdock-Repo, einmalig; danach ist sie im
+# Volume frei editierbar.
+seed /opt/devdock/config/starship.toml "$HOME/.config/starship.toml" \
+  || echo "devdock-entrypoint: starship.toml nicht übernommen" >&2
+
+# Shell-Scripts des Workspaces, die config/bashrc sourct. .devdock/ ist lokaler
+# Zustand des Containers und gehört nicht ins Repo.
+if [[ -n ${DEVDOCK_WORKSPACE:-} ]]; then
+  if [[ ! -d $DEVDOCK_WORKSPACE/.devdock ]]; then
+    mkdir -p "$DEVDOCK_WORKSPACE/.devdock" && echo '*' > "$DEVDOCK_WORKSPACE/.devdock/.gitignore"
+  fi
+  mkdir -p "$DEVDOCK_WORKSPACE/.devdock/bashrc.d"
+fi
+
 ok-autostart boot || echo "devdock-entrypoint: ok-autostart boot ist gescheitert" >&2
 
 "$@" &
