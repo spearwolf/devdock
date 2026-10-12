@@ -81,7 +81,7 @@ Headed Chromium (`headless: false`) erkennt Wayland selbst und braucht dafür ke
 
 ## Git und gh
 
-Welche globale Git-Config der Container sieht, hängt davon ab, was im devdock-Verzeichnis liegt:
+Welche globale Git-Config der Container sieht, hängt davon ab, was im Config-Verzeichnis liegt (das devdock-Verzeichnis oder `$DEVDOCK_CONFIG`, siehe [Umgebungsvariablen](#umgebungsvariablen)):
 
 1. **`./gitconfig` existiert:** Sie wird read/write eingebunden und gehört allein dem Container. `git config --global` und `gh auth setup-git` schreiben direkt hinein.
 2. **Sonst** nimmt devdock die globale Git-Config des Hosts, und zwar nur die übertragbaren Teile: user.name/email, Aliase, delta, pull/push/merge/diff-Einstellungen, `url.*.insteadOf`, den gh-Credential-Helper und Ähnliches. Signing (`commit.gpgsign`, `user.signingkey`, `gpg.*`), Includes, Host-Pfade und `core.editor` fliegen raus. Die gefilterte Fassung wird bei jedem Start neu nach `.devdock/host.gitconfig` geschrieben und read-only eingebunden.
@@ -134,6 +134,18 @@ Der Entrypoint bleibt als Elternprozess stehen, damit er die Server beim Stoppen
 ## Umgebungsvariablen
 
 `cp .env.example .env` und ausfüllen. Alles aus `.env` landet als Umgebungsvariable im Container. `.env`, `gitconfig` und `.devdock/` sind gitignored.
+
+Zwei Variablen auf dem Host verlegen die lokale Config aus dem Repo heraus:
+
+- `DEVDOCK_CONFIG` ist das Verzeichnis für `.env`, `gitconfig` und das generierte `.devdock/host.gitconfig`. Ist sie gesetzt, liest devdock nichts davon mehr aus dem Repo, auch nicht als Rückfall. Das Verzeichnis muss existieren.
+- `DEVDOCK_ENV` zeigt auf die Datei mit den Variablen für den Container und ersetzt damit `$DEVDOCK_CONFIG/.env` bzw. `./.env`. Die Datei muss existieren.
+
+```bash
+export DEVDOCK_CONFIG=~/.config/devdock
+DEVDOCK_ENV=~/secrets/work.env devdock -w ~/work/project
+```
+
+Relative Pfade gelten ab dem aktuellen Verzeichnis.
 
 ## Hinweise
 

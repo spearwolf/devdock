@@ -17,6 +17,12 @@
 # Container; alle teilen sich das Image devdock:latest und die Volumes
 # devdock-home (~/.config, ~/.local, ~/.claude), devdock-cache und devdock-addons.
 # Variablen aus ./.env landen im Container (Vorlage: .env.example).
+#
+# Umgebung:
+#   DEVDOCK_CONFIG Verzeichnis für die lokale Config (.env, gitconfig, .devdock/)
+#                  statt des devdock-Repos
+#   DEVDOCK_ENV    Datei mit den Variablen für den Container statt
+#                  $DEVDOCK_CONFIG/.env bzw. ./.env
 set -euo pipefail
 
 here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
@@ -147,6 +153,25 @@ esac
 
 files=(-f "$here/compose.yml")
 
+# --- Lokale Config -----------------------------------------------------------
+#
+# .env, gitconfig und das generierte .devdock/ liegen im devdock-Repo oder, mit
+# DEVDOCK_CONFIG, komplett dort; ein Rückgriff aufs Repo findet dann nicht statt.
+# DEVDOCK_ENV ersetzt nur die .env. Beide müssen existieren, ein Tippfehler
+# soll nicht still zu einem Container ohne Variablen führen.
+
+config_dir=$here
+if [[ -n ${DEVDOCK_CONFIG:-} ]]; then
+  [[ -d $DEVDOCK_CONFIG ]] || die "DEVDOCK_CONFIG '$DEVDOCK_CONFIG' ist kein Verzeichnis"
+  config_dir=$(readlink -f "$DEVDOCK_CONFIG")
+fi
+
+export DEVDOCK_ENV_FILE=$config_dir/.env
+if [[ -n ${DEVDOCK_ENV:-} ]]; then
+  [[ -f $DEVDOCK_ENV ]] || die "DEVDOCK_ENV '$DEVDOCK_ENV' ist keine Datei"
+  DEVDOCK_ENV_FILE=$(readlink -f "$DEVDOCK_ENV")
+fi
+
 # --- SSH-Agent ---------------------------------------------------------------
 
 if [[ -n ${SSH_AUTH_SOCK:-} && -S $SSH_AUTH_SOCK ]]; then
@@ -202,9 +227,10 @@ fi
 
 # --- Git-Config --------------------------------------------------------------
 #
-# 1. ./gitconfig im devdock-Verzeichnis existiert → read/write, gehört dem Container.
+# 1. gitconfig im Config-Verzeichnis existiert → read/write, gehört dem Container.
 # 2. sonst → die übertragbaren Teile der globalen Host-Config, read-only und bei
-#    jedem Start frisch aus dem Host erzeugt (.devdock/host.gitconfig).
+#    jedem Start frisch aus dem Host erzeugt (.devdock/host.gitconfig im
+#    Config-Verzeichnis).
 #
 # Gemountet wird jeweils das Verzeichnis, nicht die Datei: git schreibt per
 # Lockfile + rename, und ein rename auf einen Datei-Bind-Mount scheitert.
@@ -243,23 +269,23 @@ write_portable_gitconfig() {
 }
 
 if [[ $cmd == gitconfig ]]; then
-  [[ -e $here/gitconfig ]] && die "$here/gitconfig existiert schon"
+  [[ -e $config_dir/gitconfig ]] && die "$config_dir/gitconfig existiert schon"
   command -v git >/dev/null || die "git fehlt auf dem Host"
-  write_portable_gitconfig "$here/gitconfig"
-  note "$here/gitconfig aus der Host-Config erzeugt, wird ab jetzt read/write gemountet"
+  write_portable_gitconfig "$config_dir/gitconfig"
+  note "$config_dir/gitconfig aus der Host-Config erzeugt, wird ab jetzt read/write gemountet"
   exit 0
 fi
 
 export DEVDOCK_GITCONFIG_DIR DEVDOCK_GITCONFIG_FILE DEVDOCK_GITCONFIG_MODE
-if [[ -f $here/gitconfig ]]; then
-  DEVDOCK_GITCONFIG_DIR=$here
+if [[ -f $config_dir/gitconfig ]]; then
+  DEVDOCK_GITCONFIG_DIR=$config_dir
   DEVDOCK_GITCONFIG_FILE=gitconfig
   DEVDOCK_GITCONFIG_MODE=rw
   files+=(-f "$here/compose.gitconfig.yml")
 elif command -v git >/dev/null && git config --global --list >/dev/null 2>&1; then
-  mkdir -p "$here/.devdock"
-  write_portable_gitconfig "$here/.devdock/host.gitconfig"
-  DEVDOCK_GITCONFIG_DIR=$here/.devdock
+  mkdir -p "$config_dir/.devdock"
+  write_portable_gitconfig "$config_dir/.devdock/host.gitconfig"
+  DEVDOCK_GITCONFIG_DIR=$config_dir/.devdock
   DEVDOCK_GITCONFIG_FILE=host.gitconfig
   DEVDOCK_GITCONFIG_MODE=ro
   files+=(-f "$here/compose.gitconfig.yml")

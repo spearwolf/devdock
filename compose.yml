@@ -25,9 +25,10 @@ services:
     shm_size: 2gb
     group_add:
       - "${DEVDOCK_DOCKER_GID}"
-    # Lokale, gitignorte Variablen (Vorlage: .env.example)
+    # Lokale, gitignorte Variablen (Vorlage: .env.example); ./devdock wählt die
+    # Datei: $DEVDOCK_ENV, sonst .env in $DEVDOCK_CONFIG bzw. im devdock-Repo
     env_file:
-      - path: .env
+      - path: ${DEVDOCK_ENV_FILE:?bitte über ./devdock starten}
         required: false
     environment:
       DEVDOCK: "1"
