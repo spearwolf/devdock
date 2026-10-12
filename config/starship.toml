@@ -23,6 +23,12 @@ style = 'bold bright-blue'
 [directory]
 format = '💾 [$path]($style)[$read_only]($read_only_style) '
 
+# Der Workspace-Pfad erscheint als sein Name, so wie ein Repo bei
+# truncate_to_repo. Starship kennt hier keine Variablen; config/bashrc setzt
+# sie ein, bevor Starship die Datei liest.
+[directory.substitutions]
+'$DEVDOCK_WORKSPACE' = '$DEVDOCK_NAME'
+
 [dotnet]
 disabled = true
 

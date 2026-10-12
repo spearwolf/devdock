@@ -9,11 +9,33 @@ alias vim=nvim
 alias lg=lazygit
 alias lzd=lazydocker
 
+# w: in den Workspace, w src/lib: in ein Verzeichnis darin (verdeckt das
+# selten gebrauchte w aus procps)
+w() { cd "$DEVDOCK_WORKSPACE/${1:-}"; }
+
 # bash-preexec muss vor starship und atuin geladen sein: Beide hängen sich dann
 # in precmd_functions/preexec_functions ein, statt sich gegenseitig die
 # DEBUG-Trap und PROMPT_COMMAND zu überschreiben.
 if [[ -f ~/.bash-preexec.sh ]]; then
   source ~/.bash-preexec.sh
+fi
+
+# Starship kennt in seiner Config keine Variablen. Die Shell setzt deshalb
+# $DEVDOCK_WORKSPACE und $DEVDOCK_NAME in ~/.config/starship.toml ein und gibt
+# Starship die Kopie; vor jedem Prompt neu, sobald die Vorlage neuer ist, damit
+# Änderungen daran weiterhin sofort greifen.
+__devdock_starship_config() {
+  local src=~/.config/starship.toml dst=$STARSHIP_CONFIG content
+  [[ ! -f $dst || $src -nt $dst ]] || return 0
+  content=$(<"$src") || return 0
+  content=${content//'$DEVDOCK_WORKSPACE'/"$DEVDOCK_WORKSPACE"}
+  content=${content//'$DEVDOCK_NAME'/"$DEVDOCK_NAME"}
+  printf '%s\n' "$content" > "$dst.$$" && mv "$dst.$$" "$dst"
+}
+if [[ -n ${DEVDOCK_WORKSPACE:-} && -f ~/.config/starship.toml ]]; then
+  export STARSHIP_CONFIG=${XDG_RUNTIME_DIR:-/tmp}/devdock-starship.toml
+  __devdock_starship_config
+  precmd_functions+=(__devdock_starship_config)
 fi
 
 eval "$(starship init bash)"
