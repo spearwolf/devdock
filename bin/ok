@@ -1,0 +1,15 @@
+#!/bin/sh
+# Launcher für ok und open-knowledge (Symlink auf diese Datei). OpenKnowledge
+# liegt im Volume devdock-addons; fehlt es, sagt der Launcher das.
+cli="$HOME/.addons/openknowledge/npm/lib/node_modules/@inkeep/open-knowledge/dist/cli.mjs"
+
+if [ ! -f "$cli" ]; then
+  echo "OpenKnowledge ist nicht installiert, installiert wird mit: install-openknowledge" >&2
+  exit 127
+fi
+
+# Das globale Node aus der mise-Config: Der Shim nähme das Node, das ein
+# Projekt im aktuellen Verzeichnis pinnt, und OpenKnowledge braucht >= 24.
+node=$(mise --cd "$HOME" which node) || exit
+export PATH="${node%/*}:$PATH"
+exec "$node" "$cli" "$@"

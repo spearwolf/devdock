@@ -8,7 +8,7 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 | --- | --- |
 | mise (global, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, starship, zoxide, fzf, opencode, claude (Claude Code), uv, bun |
 | apt | git, git-lfs, curl, jq, bat, mc, tmux, ripgrep, fd, build-essential, wl-clipboard |
-| eigener Installer, optional | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`, Installation mit `install-hermes`) |
+| optional, per `install-*` im Container | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`, `install-hermes`), [OpenKnowledge](https://openknowledge.ai) (`ok`, `install-openknowledge`) |
 | `docker:cli`-Image | docker, docker compose, docker buildx (nur CLI, der Daemon ist der des Hosts) |
 
 Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-next). Die Plugins und Mason-Tools sind schon beim Build installiert. Für Playwright-Browser sind die Systembibliotheken vorinstalliert, die Browser selbst nicht (siehe unten).
@@ -31,7 +31,7 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 
 Wer `devdock` in den `PATH` verlinkt (`ln -s $PWD/devdock ~/.local/bin/`), kann es aus jedem Projekt heraus aufrufen.
 
-Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadurch funktionieren Bind-Mounts, die man von drinnen an den Host-Daemon schickt (`docker run -v $PWD:/src …`). Für jeden Workspace gibt es einen eigenen Container. Das Image `devdock:latest` und die Volumes `devdock-atuin` (Shell-History), `devdock-cache` (`~/.cache`: pnpm-Store, Go-Cache, Playwright-Browser) `devdock-gh` (`~/.config/gh`: der gh-Login), `devdock-claude` (`~/.claude`: Login, Settings und Verlauf von Claude Code) und `devdock-hermes` (`~/.hermes`: Hermes Agent komplett, siehe unten) teilen sich alle.
+Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadurch funktionieren Bind-Mounts, die man von drinnen an den Host-Daemon schickt (`docker run -v $PWD:/src …`). Für jeden Workspace gibt es einen eigenen Container. Das Image `devdock:latest` und die Volumes `devdock-atuin` (Shell-History), `devdock-cache` (`~/.cache`: pnpm-Store, Go-Cache, Playwright-Browser) `devdock-gh` (`~/.config/gh`: der gh-Login), `devdock-claude` (`~/.claude`: Login, Settings und Verlauf von Claude Code) und `devdock-addons` (`~/.addons`: optionale Tools samt Daten, siehe unten) teilen sich alle.
 
 ## Was vom Host kommt
 
@@ -74,11 +74,23 @@ Technisch wird das Verzeichnis eingebunden, nicht die Datei, und `GIT_CONFIG_GLO
 
 Claude Code (`claude`) kommt ebenfalls über mise. Angemeldet wird einmalig mit `/login` im Container, alternativ per `ANTHROPIC_API_KEY` in `.env`. `CLAUDE_CONFIG_DIR` zeigt auf `~/.claude`, damit auch die `.claude.json` im Volume `devdock-claude` landet und nicht im flüchtigen Home. Der eingebaute Auto-Updater ist abgeschaltet (`DISABLE_AUTOUPDATER=1`), neue Versionen bringt `./devdock build --upgrade` wie bei allen mise-Tools.
 
-## Hermes Agent
+## Optionale Tools
 
-[Hermes Agent](https://hermes-agent.nousresearch.com) ist nicht im Image. Er braucht rund 3 GB und eine lange Installation, deshalb bleibt er optional: `install-hermes` im Container ruft den offiziellen Installer auf (ohne den Computer-Use-Treiber, der im Container nichts steuern könnte). Weitere Optionen reicht das Script an den Installer durch, etwa `install-hermes --skip-browser`. Hermes verwaltet sich selbst: Checkout, eigenes Python, Node, Chromium und ffmpeg liegen zusammen mit Config, `.env`, Sessions, Memories und Skills in `~/.hermes`. Das ganze Verzeichnis ist deshalb das Volume `devdock-hermes`.
+Große oder selten gebrauchte Tools sind nicht im Image. Jedes hat ein `install-*`-Script, das es im Container ins Volume `devdock-addons` installiert. Weil alle Workspaces das Volume teilen, wird nur einmal installiert. Jedes Tool bekommt ein eigenes Unterverzeichnis in `~/.addons`, und die Pfade, die es selbst erwartet (`~/.hermes`, `~/.ok`), sind im Image als Symlinks dorthin angelegt. Die Befehle bringt das Image als Launcher mit; ohne Installation melden sie nur, welches `install-*` fehlt. Zurückgesetzt wird ein einzelnes Tool mit `rm -rf ~/.addons/<tool>`, `docker volume rm devdock-addons` nimmt alle mit.
 
-Weil alle Workspaces das Volume teilen, wird nur einmal installiert. Ist Hermes schon da, verweist `install-hermes` auf `hermes update`, das ihn im Volume aktualisiert; ein Rebuild ändert an der installierten Version nichts. Die Befehle `hermes`, `hermes-acp` und `hermes-agent` bringt das Image als Launcher mit; ohne Installation melden sie nur, dass `install-hermes` fehlt. Eingerichtet wird einmalig mit `hermes setup` (Provider, API-Key), der Key landet in `~/.hermes/.env` im Volume. Das Messaging-Gateway lässt sich nicht als Dienst installieren (`hermes gateway install` braucht systemd), läuft aber mit `hermes gateway run` im Vordergrund, etwa in einem eigenen tmux-Fenster.
+### Hermes Agent
+
+[Hermes Agent](https://hermes-agent.nousresearch.com) ist nicht im Image. Er braucht rund 3 GB und eine lange Installation, deshalb bleibt er optional: `install-hermes` im Container ruft den offiziellen Installer auf (ohne den Computer-Use-Treiber, der im Container nichts steuern könnte). Weitere Optionen reicht das Script an den Installer durch, etwa `install-hermes --skip-browser`. Hermes verwaltet sich selbst: Checkout, eigenes Python, Node, Chromium und ffmpeg liegen zusammen mit Config, `.env`, Sessions, Memories und Skills in `~/.hermes`. Das ganze Verzeichnis liegt deshalb im Volume (`~/.addons/hermes`).
+
+Ist Hermes schon da, verweist `install-hermes` auf `hermes update`, das ihn im Volume aktualisiert; ein Rebuild ändert an der installierten Version nichts. Launcher gibt es für `hermes`, `hermes-acp` und `hermes-agent`. Eingerichtet wird einmalig mit `hermes setup` (Provider, API-Key), der Key landet in `~/.hermes/.env` im Volume. Das Messaging-Gateway lässt sich nicht als Dienst installieren (`hermes gateway install` braucht systemd), läuft aber mit `hermes gateway run` im Vordergrund, etwa in einem eigenen tmux-Fenster.
+
+### OpenKnowledge
+
+[OpenKnowledge](https://openknowledge.ai) ist ein Markdown-Editor für Wissensbasen, in dem Menschen und Agenten an denselben Dateien arbeiten. `install-openknowledge` installiert das npm-Paket `@inkeep/open-knowledge` mit eigenem Prefix nach `~/.addons/openknowledge/npm`; ein gewöhnliches `npm install -g` landete in der Node-Installation von mise und wäre mit dem Container weg. Erneut aufgerufen aktualisiert es, mit Argument auf eine bestimmte Version (`install-openknowledge 0.85.0`). Die globalen Daten (`~/.ok`: Config, Skills, Logs) liegen in `~/.addons/openknowledge/home`.
+
+Der Launcher `ok` (auch `open-knowledge`) startet immer mit dem globalen Node aus `config/mise.toml`. Der `node`-Shim nähme sonst das Node, das ein Projekt im aktuellen Verzeichnis pinnt, und OpenKnowledge braucht mindestens Node 24.
+
+Die Web-App startet im Projekt mit `ok init` und `ok start --no-open-browser` (im Container gibt es keinen Browser, den `ok` öffnen könnte). Durch das Host-Netz ist sie direkt im Browser des Hosts erreichbar.
 
 ## Umgebungsvariablen
 

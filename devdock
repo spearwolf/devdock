@@ -15,7 +15,7 @@
 #
 # DIR ist per Default das aktuelle Verzeichnis. Pro Workspace läuft ein eigener
 # Container; alle teilen sich das Image devdock:latest und die Volumes
-# devdock-atuin, devdock-cache, devdock-gh, devdock-claude und devdock-hermes.
+# devdock-atuin, devdock-cache, devdock-gh, devdock-claude und devdock-addons.
 # Variablen aus ./.env landen im Container (Vorlage: .env.example).
 set -euo pipefail
 
@@ -71,7 +71,7 @@ DEVDOCK_DOCKER_GID=$(stat -c %g "$docker_sock")
 # devdock-Container zu finden; den Workspace verrät ihr working_dir.
 
 image=devdock:latest
-shared_volumes=(devdock-atuin devdock-cache devdock-gh devdock-claude devdock-hermes)
+shared_volumes=(devdock-atuin devdock-cache devdock-gh devdock-claude devdock-addons)
 
 devdock_containers() {
   docker ps -a --filter "label=com.docker.compose.project.working_dir=$here" "$@"

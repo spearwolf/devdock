@@ -60,7 +60,18 @@ ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME
 
 # Volumes werden beim ersten Anlegen mit Inhalt und Ownership dieser Pfade
 # initialisiert — ohne sie gehörten die Volumes root.
-RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude ~/.hermes
+RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude
+
+# Optionale Tools teilen sich das Volume devdock-addons (~/.addons), je eines pro
+# Unterverzeichnis. Ihre gewohnten Pfade zeigen per Symlink dorthin. Ein neues
+# Volume übernimmt die Unterverzeichnisse von hier, ein älteres nicht; deshalb
+# legen die install-*-Scripts ihres zusätzlich selbst an.
+RUN <<EOF
+set -eux
+mkdir -p ~/.addons/hermes ~/.addons/openknowledge/home ~/.addons/openknowledge/npm
+ln -s .addons/hermes ~/.hermes
+ln -s .addons/openknowledge/home ~/.ok
+EOF
 
 # Die Starship-Config kommt live aus dem gemounteten config/ des devdock-Repos
 # (compose.yml). Gemountet wird das Verzeichnis, nicht die Datei: Editoren
@@ -104,11 +115,16 @@ nvim --headless '+qa'
 nvim --headless -c 'MasonToolsInstallSync' -c 'qa'
 EOF
 
-# Hermes Agent ist optional: "install-hermes" installiert ihn im Container ins
-# Volume devdock-hermes (~/.hermes). Checkout, eigenes Python/Node/Chromium und
-# Nutzerdaten liegen dort zusammen, das Image bringt nur Installer-Script und
-# Launcher mit. Updates laufen über "hermes update", nicht über den Rebuild.
-COPY bin/install-hermes bin/hermes /usr/local/bin/
-RUN sudo ln -s hermes /usr/local/bin/hermes-acp && sudo ln -s hermes /usr/local/bin/hermes-agent
+# Optionale Tools installiert man im Container mit ihrem install-*-Script ins
+# Volume devdock-addons; das Image bringt nur die Scripts und Launcher mit.
+# Hermes Agent: Checkout, eigenes Python/Node/Chromium und Nutzerdaten in
+# ~/.hermes, Updates über "hermes update". OpenKnowledge: npm-Paket samt ~/.ok.
+COPY bin/install-hermes bin/hermes bin/install-openknowledge bin/ok /usr/local/bin/
+RUN <<EOF
+set -eux
+sudo ln -s hermes /usr/local/bin/hermes-acp
+sudo ln -s hermes /usr/local/bin/hermes-agent
+sudo ln -s ok /usr/local/bin/open-knowledge
+EOF
 
 CMD ["sleep", "infinity"]

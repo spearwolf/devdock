@@ -43,13 +43,15 @@ services:
       - cache:/home/${DEVDOCK_USER}/.cache
       - gh:/home/${DEVDOCK_USER}/.config/gh
       - claude:/home/${DEVDOCK_USER}/.claude
-      - hermes:/home/${DEVDOCK_USER}/.hermes
+      # Optionale Tools (install-hermes, install-openknowledge, …), je eines pro
+      # Unterverzeichnis; ~/.hermes, ~/.ok usw. sind im Image dorthin verlinkt
+      - addons:/home/${DEVDOCK_USER}/.addons
       # Configs aus dem devdock-Repo, im Image nach ~/.config verlinkt
       - ./config:/opt/devdock/config:ro
 
 # Feste Namen: alle Workspaces teilen sich Shell-History, Caches (pnpm-Store,
 # Go-Build-Cache, Playwright-Browser), den gh-Login, den Claude-Code-Login und
-# die Hermes-Installation samt Daten. external, weil jeder Workspace ein eigenes
+# die optional installierten Tools samt Daten. external, weil jeder Workspace ein eigenes
 # Compose-Projekt ist und keines die Volumes besitzen soll; ./devdock legt sie
 # an. Leer gemountet übernehmen sie trotzdem Inhalt und Ownership aus dem Image.
 volumes:
@@ -65,6 +67,6 @@ volumes:
   claude:
     name: devdock-claude
     external: true
-  hermes:
-    name: devdock-hermes
+  addons:
+    name: devdock-addons
     external: true

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installiert Hermes Agent mit dem offiziellen Installer ins Volume
-# devdock-hermes (~/.hermes). Alle Workspaces teilen sich das Volume, die
-# Installation ist also einmalig; danach aktualisiert "hermes update".
+# devdock-addons (~/.hermes zeigt dorthin). Alle Workspaces teilen sich das
+# Volume, die Installation ist also einmalig; danach aktualisiert "hermes update".
 #
 #   install-hermes [INSTALLER-OPTIONEN]   z. B. --skip-browser
 #
@@ -14,6 +14,10 @@ if [[ -x $hermes_bin ]]; then
   echo "Hermes Agent ist schon installiert, aktualisiert wird mit: hermes update" >&2
   exit 0
 fi
+
+# Das Ziel des Symlinks ~/.hermes fehlt nach einem Zurücksetzen per
+# rm -rf ~/.addons/hermes
+mkdir -p "$HOME/.addons/hermes"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

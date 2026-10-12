@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Installiert OpenKnowledge (npm-Paket @inkeep/open-knowledge, Befehl ok) ins
+# Volume devdock-addons. Ein gewöhnliches "npm install -g" landete in der
+# Node-Installation von mise, also im Container, und wäre mit ihm weg.
+# Erneut aufgerufen aktualisiert es auf die neueste Version.
+#
+#   install-openknowledge [VERSION]   Default: latest
+set -euo pipefail
+
+addon="$HOME/.addons/openknowledge"
+mkdir -p "$addon/npm" "$addon/home"
+
+# Das globale Node aus der mise-Config, nicht das, was ein Projekt im aktuellen
+# Verzeichnis pinnt; npm selbst startet per "env node", daher auch der PATH.
+node=$(mise --cd "$HOME" which node)
+export PATH="${node%/*}:$PATH"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+npm_config_cache="$tmp" npm install --global --prefix "$addon/npm" \
+  "@inkeep/open-knowledge@${1:-latest}"
+
+echo
+echo "OpenKnowledge ist installiert ($(ok --version | head -1)). Web-App im Projekt: ok init, dann ok start --no-open-browser"
