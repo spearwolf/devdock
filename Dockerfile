@@ -125,6 +125,10 @@ set -eux
 sudo ln -s hermes /usr/local/bin/hermes-acp
 sudo ln -s hermes /usr/local/bin/hermes-agent
 sudo ln -s ok /usr/local/bin/open-knowledge
+# Die .mcp.json, die OpenKnowledge in Projekte schreibt, sucht das Linux-Paket
+# hier; so startet der MCP-Server mit dem ok aus dem Volume statt per npx.
+sudo mkdir -p /opt/OpenKnowledge/resources/cli/bin
+sudo ln -s /usr/local/bin/ok /opt/OpenKnowledge/resources/cli/bin/ok.sh
 EOF
 
 CMD ["sleep", "infinity"]

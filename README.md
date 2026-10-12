@@ -90,6 +90,8 @@ Ist Hermes schon da, verweist `install-hermes` auf `hermes update`, das ihn im V
 
 Der Launcher `ok` (auch `open-knowledge`) startet immer mit dem globalen Node aus `config/mise.toml`. Der `node`-Shim nähme sonst das Node, das ein Projekt im aktuellen Verzeichnis pinnt, und OpenKnowledge braucht mindestens Node 24.
 
+Den MCP-Server startet die `.mcp.json`, die `ok init` ins Projekt schreibt. Ihr Script probiert nacheinander die macOS-App, das Linux-Paket unter `/opt/OpenKnowledge` und zuletzt `npx -y @inkeep/open-knowledge@latest`. Das Image legt dort, wo das Linux-Paket erwartet wird (`/opt/OpenKnowledge/resources/cli/bin/ok.sh`), einen Symlink auf den Launcher an. So nutzen Claude Code, Codex und OpenCode die mit `install-openknowledge` installierte Version, ohne die `.mcp.json` des Projekts anzufassen; auf macOS funktioniert sie unverändert. npx holte sonst bei jedem Start übers Netz die neueste Version, die von der des `ok`-Servers abweichen kann. Ist OpenKnowledge nicht installiert, bricht der MCP-Start mit dem Hinweis auf `install-openknowledge` ab, statt auf npx auszuweichen.
+
 Die Web-App startet im Projekt mit `ok init` und `ok start --no-open-browser` (im Container gibt es keinen Browser, den `ok` öffnen könnte). Durch das Host-Netz ist sie direkt im Browser des Hosts erreichbar.
 
 ## Umgebungsvariablen
