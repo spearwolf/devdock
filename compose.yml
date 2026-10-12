@@ -3,6 +3,7 @@
 #   compose.ssh.yml         SSH-Agent des Hosts
 #   compose.wayland.yml     Wayland-Display des Hosts
 #   compose.gpu.yml         /dev/dri für hardwarebeschleunigtes Rendering
+#   compose.x11.yml         X11-Display des Hosts (XWayland)
 #   compose.tmux.yml        tmux-Config des Hosts
 #   compose.gitconfig.yml   ./gitconfig (rw) oder gefilterte Host-Git-Config (ro)
 #   compose.git-ignore.yml  globale Git-ignore-Liste des Hosts
@@ -43,14 +44,17 @@ services:
       - cache:/home/${DEVDOCK_USER}/.cache
       - gh:/home/${DEVDOCK_USER}/.config/gh
       - claude:/home/${DEVDOCK_USER}/.claude
+      - hermes:/home/${DEVDOCK_USER}/.hermes
+      - applications:/home/${DEVDOCK_USER}/Applications
       # Configs aus dem devdock-Repo, im Image nach ~/.config verlinkt
       - ./config:/opt/devdock/config:ro
 
 # Feste Namen: alle Workspaces teilen sich Shell-History, Caches (pnpm-Store,
-# Go-Build-Cache, Playwright-Browser), den gh-Login und den Claude-Code-Login. external, weil jeder
-# Workspace ein eigenes Compose-Projekt ist und keines die Volumes besitzen soll;
-# ./devdock legt sie an. Leer gemountet übernehmen sie trotzdem Inhalt und
-# Ownership aus dem Image.
+# Go-Build-Cache, Playwright-Browser), den gh-Login, den Claude-Code-Login, die
+# Hermes-Installation samt Daten und die AppImages in ~/Applications. external,
+# weil jeder Workspace ein eigenes Compose-Projekt ist und keines die Volumes
+# besitzen soll; ./devdock legt sie an. Leer gemountet übernehmen sie trotzdem
+# Inhalt und Ownership aus dem Image.
 volumes:
   atuin:
     name: devdock-atuin
@@ -63,4 +67,10 @@ volumes:
     external: true
   claude:
     name: devdock-claude
+    external: true
+  hermes:
+    name: devdock-hermes
+    external: true
+  applications:
+    name: devdock-applications
     external: true

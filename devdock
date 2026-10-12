@@ -15,8 +15,9 @@
 #
 # DIR ist per Default das aktuelle Verzeichnis. Pro Workspace läuft ein eigener
 # Container; alle teilen sich das Image devdock:latest und die Volumes
-# devdock-atuin, devdock-cache, devdock-gh und devdock-claude. Variablen aus ./.env landen im
-# Container (Vorlage: .env.example).
+# devdock-atuin, devdock-cache, devdock-gh, devdock-claude, devdock-hermes und
+# devdock-applications.
+# Variablen aus ./.env landen im Container (Vorlage: .env.example).
 set -euo pipefail
 
 here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
@@ -71,7 +72,8 @@ DEVDOCK_DOCKER_GID=$(stat -c %g "$docker_sock")
 # devdock-Container zu finden; den Workspace verrät ihr working_dir.
 
 image=devdock:latest
-shared_volumes=(devdock-atuin devdock-cache devdock-gh devdock-claude)
+shared_volumes=(devdock-atuin devdock-cache devdock-gh devdock-claude devdock-hermes
+  devdock-applications)
 
 devdock_containers() {
   docker ps -a --filter "label=com.docker.compose.project.working_dir=$here" "$@"
@@ -183,6 +185,22 @@ if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
     fi
   else
     note "Wayland-Socket $wayland_sock nicht gefunden, starte ohne GUI"
+  fi
+fi
+
+# --- X11 (XWayland) ----------------------------------------------------------
+#
+# Nur ein lokales Display (":0") mit Socket und Cookie-Datei. Mit dem Host-Netz
+# teilt der Container auch den Hostnamen, die Cookie-Einträge passen also.
+
+if [[ ${DISPLAY:-} =~ ^:([0-9]+) ]]; then
+  if [[ -S /tmp/.X11-unix/X${BASH_REMATCH[1]} && -f ${XAUTHORITY:-} ]]; then
+    export DEVDOCK_DISPLAY=$DISPLAY
+    export DEVDOCK_XAUTHORITY
+    DEVDOCK_XAUTHORITY=$(readlink -f "$XAUTHORITY")
+    files+=(-f "$here/compose.x11.yml")
+  else
+    note "X11-Socket oder XAUTHORITY für $DISPLAY nicht gefunden, starte ohne X11"
   fi
 fi
 

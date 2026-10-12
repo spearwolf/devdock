@@ -1,0 +1,11 @@
+# X11 über das XWayland des Hosts, für Programme ohne Wayland-Backend
+# (AppImageLauncher: sein gebündeltes Qt kann nur xcb). Der Cookie gilt nur für
+# die laufende Host-Session; nach neuem Login den Container neu starten.
+services:
+  dev:
+    environment:
+      DISPLAY: ${DEVDOCK_DISPLAY}
+      XAUTHORITY: /run/user/${DEVDOCK_UID}/Xauthority
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ${DEVDOCK_XAUTHORITY}:/run/user/${DEVDOCK_UID}/Xauthority:ro
