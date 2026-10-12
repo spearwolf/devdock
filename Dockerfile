@@ -33,29 +33,6 @@ EOF
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 
-# AppImageLauncher gibt es nur noch als v3-Beta. Sein postinst will sich per
-# systemd-binfmt als Interpreter für AppImages registrieren; im Build läuft kein
-# systemd, und binfmt_misc gehört ohnehin dem Host-Kernel. Deshalb wird das
-# Paket entpackt, das postinst verworfen und der Rest per apt konfiguriert.
-# Das gebündelte Qt kann nur X11, die GUI braucht also compose.x11.yml.
-ARG APPIMAGELAUNCHER_TAG=v3.0.0-beta-3
-RUN <<EOF
-set -eux
-arch=$(dpkg --print-architecture)
-url=$(curl -fsSL "https://api.github.com/repos/TheAssassin/AppImageLauncher/releases/tags/${APPIMAGELAUNCHER_TAG}" \
-  | jq -r --arg suffix "_${arch}.deb" '.assets[] | select(.name | endswith($suffix)) | .browser_download_url')
-curl -fsSL -o /tmp/appimagelauncher.deb "${url}"
-apt-get update
-dpkg --unpack /tmp/appimagelauncher.deb
-rm /var/lib/dpkg/info/appimagelauncher.postinst
-apt-get install -y -f --no-install-recommends
-rm -rf /tmp/appimagelauncher.deb /var/lib/apt/lists/*
-EOF
-
-# Ohne /dev/fuse (bräuchte CAP_SYS_ADMIN) können AppImages sich nicht mounten;
-# so entpacken sie sich stattdessen bei jedem Start nach /tmp.
-ENV APPIMAGE_EXTRACT_AND_RUN=1
-
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
 
 RUN <<EOF
@@ -83,7 +60,7 @@ ENV PATH=/home/${USERNAME}/.local/share/mise/shims:${PNPM_HOME}:/home/${USERNAME
 
 # Volumes werden beim ersten Anlegen mit Inhalt und Ownership dieser Pfade
 # initialisiert — ohne sie gehörten die Volumes root.
-RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude ~/Applications
+RUN mkdir -p ~/.local/share/atuin ~/.cache ~/.config/gh ~/.claude
 
 # Die Starship-Config kommt live aus dem gemounteten config/ des devdock-Repos
 # (compose.yml). Gemountet wird das Verzeichnis, nicht die Datei: Editoren

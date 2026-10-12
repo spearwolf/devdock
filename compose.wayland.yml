@@ -3,7 +3,6 @@ services:
   dev:
     environment:
       WAYLAND_DISPLAY: wayland-0
-      # Hält Chromium auf Wayland, obwohl compose.x11.yml auch DISPLAY setzt
       XDG_SESSION_TYPE: wayland
       GDK_BACKEND: wayland,x11
       QT_QPA_PLATFORM: wayland;xcb
