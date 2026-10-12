@@ -16,6 +16,8 @@ services:
         USERNAME: ${DEVDOCK_USER:?bitte über ./devdock starten}
         USER_UID: ${DEVDOCK_UID:?bitte über ./devdock starten}
         USER_GID: ${DEVDOCK_GID:?bitte über ./devdock starten}
+        # Leer heißt nvim-config-next (Default im Dockerfile)
+        NEOVIM_CONFIG: ${DEVDOCK_NEOVIM_CONFIG:-}
     init: true
     # Zeit für devdock-entrypoint, die OpenKnowledge-Server sauber anzuhalten
     stop_grace_period: 30s

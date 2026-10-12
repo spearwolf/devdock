@@ -17,6 +17,7 @@
 # Container; alle teilen sich das Image devdock:latest und die Volumes
 # devdock-home (~/.config, ~/.local, ~/.claude), devdock-cache und devdock-addons.
 # Variablen aus ./.env landen im Container (Vorlage: .env.example).
+# DEVDOCK_NEOVIM_CONFIG darin wählt beim Build das Git-Repo der Neovim-Config.
 #
 # Umgebung:
 #   DEVDOCK_CONFIG Verzeichnis für die lokale Config (.env, gitconfig, .devdock/)
@@ -307,8 +308,15 @@ slug=${slug,,}
 slug=${slug//[^a-z0-9]/-}
 project="devdock-${slug}-$(printf %s "$workspace" | sha1sum | cut -c1-6)"
 
+# Die .env dient auch der Interpolation in den Compose-Files (Build-Argumente
+# wie DEVDOCK_NEOVIM_CONFIG). Ohne --env-file läse Compose stattdessen die .env
+# im Repo, auch wenn DEVDOCK_CONFIG oder DEVDOCK_ENV woandershin zeigen.
+compose_env_file=$DEVDOCK_ENV_FILE
+[[ -f $compose_env_file ]] || compose_env_file=/dev/null
+
 compose() {
-  docker compose --project-directory "$here" -p "$project" "${files[@]}" "$@"
+  docker compose --project-directory "$here" -p "$project" --env-file "$compose_env_file" \
+    "${files[@]}" "$@"
 }
 
 # devdock-home ist per subpath eingebunden (compose.yml), und Docker verweigert

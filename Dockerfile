@@ -116,9 +116,12 @@ EOF
 # es nicht, und devdock-entrypoint kopiert fehlende Einträge ins Volume. Das mv
 # steht im selben RUN wie Neovim, sonst läge dessen Inhalt (~360 MB) doppelt
 # im Image; spätere Schritte dürfen in beide Pfade nichts mehr schreiben.
+# NEOVIM_CONFIG: Git-Repo der Config, aus DEVDOCK_NEOVIM_CONFIG in der .env.
+# Steht erst hier, damit ein anderer Wert nur ab diesem Layer neu baut.
+ARG NEOVIM_CONFIG=
 RUN <<EOF
 set -eux
-git clone https://github.com/spearwolf/nvim-config-next ~/.config/nvim
+git clone "${NEOVIM_CONFIG:-https://github.com/spearwolf/nvim-config-next}" ~/.config/nvim
 nvim --headless '+qa'
 nvim --headless -c 'MasonToolsInstallSync' -c 'qa'
 sudo install -d -o "${USER_UID}" -g "${USER_GID}" /opt/devdock/skel

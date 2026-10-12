@@ -11,7 +11,7 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 | optional, per `install-*` im Container | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`, `install-hermes`), [OpenKnowledge](https://openknowledge.ai) (`ok`, `install-openknowledge`) |
 | `docker:cli`-Image | docker, docker compose, docker buildx (nur CLI, der Daemon ist der des Hosts) |
 
-Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-next). Die Plugins und Mason-Tools sind schon beim Build installiert. Für Playwright-Browser sind die Systembibliotheken vorinstalliert, die Browser selbst nicht (siehe unten).
+Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-next), eine andere Config wählt `DEVDOCK_NEOVIM_CONFIG` in `.env` (siehe [Neovim-Config](#neovim-config)). Die Plugins und Mason-Tools sind schon beim Build installiert. Für Playwright-Browser sind die Systembibliotheken vorinstalliert, die Browser selbst nicht (siehe unten).
 
 ## Benutzung
 
@@ -146,6 +146,19 @@ DEVDOCK_ENV=~/secrets/work.env devdock -w ~/work/project
 ```
 
 Relative Pfade gelten ab dem aktuellen Verzeichnis.
+
+`./devdock` reicht die gewählte `.env` außerdem als `--env-file` an Compose weiter. Ihre Variablen stehen damit auch beim Build bereit, was `DEVDOCK_NEOVIM_CONFIG` braucht. Gibt es die Datei nicht, liest Compose gar keine, auch nicht die `.env` im Repo.
+
+### Neovim-Config
+
+```bash
+# .env
+DEVDOCK_NEOVIM_CONFIG=https://github.com/you/nvim-config
+```
+
+`DEVDOCK_NEOVIM_CONFIG` ist das Git-Repo, das der Build nach `~/.config/nvim` klont, bevor er Plugins und Mason-Tools installiert. Ohne die Variable (oder leer) ist es [nvim-config-next](https://github.com/spearwolf/nvim-config-next). Geklont wird beim Build ohne SSH-Agent und ohne Token; das Repo muss also per HTTPS öffentlich erreichbar sein. Gesetzt in der Shell des Hosts, gewinnt die Variable gegenüber `.env`.
+
+Wirksam wird ein neuer Wert mit `./devdock build`; Docker baut dabei erst ab dem Neovim-Layer neu. Im Home-Volume ändert das allein nichts, denn `devdock-entrypoint` kopiert nur, was dort ganz fehlt (siehe [Home-Volume](#home-volume)). Zum Wechseln im Container `rm -rf ~/.config/nvim ~/.local/share/nvim ~/.local/state/nvim`, dann `./devdock down` und `./devdock`. Weil alle Workspaces das Volume teilen, gilt die neue Config danach überall.
 
 ## Hinweise
 
