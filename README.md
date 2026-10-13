@@ -129,6 +129,8 @@ Den MCP-Server startet die `.mcp.json`, die `ok init` ins Projekt schreibt. Ihr 
 
 Die Web-App startet im Projekt mit `ok init` und `ok start --no-open-browser` (im Container gibt es keinen Browser, den `ok` öffnen könnte). Durch das Host-Netz ist sie direkt im Browser des Hosts erreichbar, in einem Tailscale-Workspace unter der URL, die `ok-autostart` nennt.
 
+Dort kommt der Host über die Loopback-Weiterleitung des Sidecars: Die Verbindung stammt nicht vom Loopback, und Host und Origin tragen die Bridge-IP (bzw. `localhost` bei publizierten Ports). Solche Anfragen lehnt OpenKnowledge mit 403 ab. `ok-autostart` startet die Server deshalb im Tailscale-Workspace mit `OK_ALLOW_EXTERNAL=1` und setzt die URL aus `devdock-net url` per `OK_EXTERNAL_URL` auf die Host-/Origin-Allowlist. Der Server hat keine Authentifizierung; erreichbar ist er trotzdem nur über die Bridge und publizierte Ports, nicht übers Tailnet. Ein von Hand gestartetes `ok start` bekommt diese Variablen nicht und antwortet dem Host weiter mit 403.
+
 #### Autostart mit dem Container
 
 ```bash
