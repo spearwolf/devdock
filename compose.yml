@@ -41,6 +41,9 @@ services:
       # Workspace-Wurzel, dort liegt .devdock/ok-autostart (ok activate)
       DEVDOCK_WORKSPACE: ${DEVDOCK_WORKSPACE}
       XDG_RUNTIME_DIR: /run/user/${DEVDOCK_UID}
+      # Der Tailscale-Key aus .env ist für den Sidecar (compose.tailscale.yml),
+      # nicht für jeden Prozess im Container; environment schlägt env_file.
+      TS_AUTHKEY: ""
     # Workspace liegt im Container unter demselben Pfad wie auf dem Host. Nur so
     # stimmen Bind-Mounts, die man von drinnen an den Host-Daemon schickt.
     working_dir: ${DEVDOCK_WORKSPACE}

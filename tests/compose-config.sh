@@ -111,5 +111,30 @@ ok_if "off löscht den Marker" test ! -e "$fresh/.devdock/tailscale"
 fails_if "off ohne Marker scheitert" "$devdock" -w "$fresh" tailscale off
 check "off wirkt auf die Konfiguration" "$fresh" '.services.dev.network_mode == "host"'
 
+# Ein kaputter Marker darf die Kommandos nicht sperren, die ihn reparieren
+broken=$tmp/broken
+marker "$broken" '08\n'
+ok_if "kaputter Marker: off geht trotzdem" "$devdock" -w "$broken" tailscale off
+marker "$broken" '08\n'
+ok_if "kaputter Marker: on PORT schreibt neu" "$devdock" -w "$broken" tailscale on 5173
+ok_if "kaputter Marker: Liste ersetzt" grep -qx 5173 "$broken/.devdock/tailscale"
+marker "$broken" '08\n'
+ok_if "kaputter Marker: down geht trotzdem" "$devdock" -w "$broken" down
+
+# Der Auth-Key aus .env ist für den Sidecar, nicht für jeden Prozess in dev
+keyed=$tmp/keyed
+marker "$keyed" ''
+printf 'TS_AUTHKEY=tskey-test\n' > "$DEVDOCK_CONFIG/.env"
+check "Auth-Key erreicht den Sidecar" "$keyed" '.services.tailscale.environment.TS_AUTHKEY == "tskey-test"'
+check "Auth-Key bleibt aus dev heraus" "$keyed" '(.services.dev.environment.TS_AUTHKEY // "") == ""'
+check "Auth-Key bleibt aus dev im Host-Netz heraus" "$plain" '(.services.dev.environment.TS_AUTHKEY // "") == ""'
+rm "$DEVDOCK_CONFIG/.env"
+
+# Hostnamen dürfen höchstens 63 Zeichen haben, sonst startet der Sidecar nicht
+long=$tmp/$(printf 'a%.0s' {1..70})
+marker "$long" ''
+check "langer Workspace-Name: Hostnamen kurz genug" "$long" \
+  '(.services.tailscale.hostname | length) <= 63 and (.services.tailscale.environment.TS_HOSTNAME | length) <= 63'
+
 ((fails == 0)) || { echo "$fails Prüfung(en) gescheitert"; exit 1; }
 echo "alle Prüfungen bestanden"

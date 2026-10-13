@@ -5,7 +5,7 @@
 services:
   tailscale:
     image: tailscale/tailscale:stable
-    hostname: devdock-${DEVDOCK_SLUG}
+    hostname: ${DEVDOCK_TS_HOSTNAME}
     cap_add:
       - NET_ADMIN
     devices:
@@ -21,7 +21,7 @@ services:
       TS_STATE_DIR: /var/lib/tailscale
       # Der Default-Pfad des CLI, damit "tailscale …" im Sidecar ohne --socket geht
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
-      TS_HOSTNAME: devdock-${DEVDOCK_SLUG}
+      TS_HOSTNAME: ${DEVDOCK_TS_HOSTNAME}
       TS_ACCEPT_DNS: "true"
       TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
@@ -58,7 +58,7 @@ services:
       - tailscale
     environment:
       DEVDOCK_NET: tailscale
-      DEVDOCK_TS_HOSTNAME: devdock-${DEVDOCK_SLUG}
+      DEVDOCK_TS_HOSTNAME: ${DEVDOCK_TS_HOSTNAME}
       DEVDOCK_PUBLISHED_PORTS: ${DEVDOCK_PUBLISHED_PORTS:-}
 
 # Gehört dem Compose-Projekt des Workspaces: <project>_tailscale-state. Bleibt

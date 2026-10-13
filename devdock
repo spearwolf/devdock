@@ -347,6 +347,12 @@ slug=${slug,,}
 slug=${slug//[^a-z0-9]/-}
 project="devdock-${slug}-$(printf %s "$workspace" | sha1sum | cut -c1-6)"
 export DEVDOCK_SLUG=$slug
+# Node- und Hostname des Sidecars; Hostnamen haben höchstens 63 Zeichen
+ts_hostname=devdock-${slug:0:55}
+while [[ $ts_hostname == *- ]]; do
+  ts_hostname=${ts_hostname%-}
+done
+export DEVDOCK_TS_HOSTNAME=$ts_hostname
 
 # --- Tailscale ---------------------------------------------------------------
 #
@@ -378,7 +384,13 @@ tailscale_ports() {
 export DEVDOCK_PUBLISHED_PORTS=
 if [[ -f $ts_marker ]]; then
   files+=(-f "$here/compose.tailscale.yml")
-  ts_ports=$(tailscale_ports)
+  if ! ts_ports=$(tailscale_ports); then
+    # Ein kaputter Marker darf die Kommandos nicht sperren, die ihn ersetzen
+    # oder den Container anhalten
+    [[ $cmd == tailscale || $cmd == down ]] || exit 1
+    note "Port-Liste ignoriert"
+    ts_ports=
+  fi
   DEVDOCK_PUBLISHED_PORTS=${ts_ports//$'\n'/ }
   if [[ -n $ts_ports ]]; then
     ts_ports_file=$config_dir/.devdock/$project.ports.yml
