@@ -58,8 +58,9 @@ CONTAINER LIFECYCLE (this workspace)
                   devdock up
 
   down [ARGS]   Stop and remove this workspace's containers. Volumes stay.
-                Needed to recover a broken Tailscale network or to get a
-                fresh container. Ends running tmux sessions.
+                Needed after `devdock build` to move a running container to
+                the new image, and to recover a broken Tailscale network.
+                Ends running tmux sessions.
                   devdock down && devdock
 
   ps [ARGS]     Containers of this workspace (`docker compose ps`).
@@ -81,9 +82,8 @@ IMAGE
                            versions; apt layers stay cached
                 ARGS go to `docker compose build`, e.g. --no-cache.
                 Also refreshes the Tailscale sidecar image if present.
-                Running containers keep the old image until the next start
-                in their workspace (devdock, up, shell, exec) recreates
-                them, which ends their tmux sessions; devdock says so.
+                Running containers keep the old image until `devdock down`;
+                stopped ones switch to the new image on their next start.
                   devdock build
                   devdock build --upgrade
 
@@ -174,7 +174,7 @@ CHEAT SHEET
   Second terminal, same view  devdock (attaches to the same tmux session)
   One-off command             devdock exec pnpm install
   Newer tool versions         devdock build --upgrade, then
-                              devdock per workspace
+                              devdock down && devdock per workspace
   Which containers run where  devdock status
   Where is my dev server      devdock ports
   Container acts up           devdock logs, then devdock down && devdock
@@ -704,24 +704,27 @@ init_home_volume() {
 
 # Die geteilten Volumes sind in compose.yml external und werden hier angelegt.
 compose_up() {
-  local volume stale running image_id
+  local volume stale running image_id up_args=()
   stale=$(image_staleness)
   if [[ -n $stale ]]; then
     note "$stale"
   fi
-  # Nach einem build ersetzt compose up einen Container auf dem alten Image von
-  # selbst, auch einen laufenden, an dem noch ein anderes Terminal hängt
+  # Nach einem build ersetzte compose up einen Container auf dem alten Image von
+  # selbst, auch einen laufenden samt tmux-Sessions. Ein laufender bleibt
+  # deshalb, wie er ist; das neue Image bekommt er erst nach devdock down.
   running=$(compose ps -q --status running dev 2>/dev/null || true)
   image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
-  if [[ -n $running && -n $image_id && $(docker inspect -f '{{.Image}}' "$running") != "$image_id" ]]; then
-    note "der Container läuft noch auf dem alten Image und wird jetzt neu erstellt, laufende tmux-Sessions enden dabei"
+  if [[ -n $running && -n $image_id && $(docker inspect -f '{{.Image}}' "$running") != "$image_id" \
+    && " $* " != *" --force-recreate "* ]]; then
+    up_args+=(--no-recreate)
+    note "der Container läuft noch auf dem alten Image und bleibt dabei; das neue übernimmt er nach devdock down"
   fi
   docker volume inspect devdock-home >/dev/null 2>&1 || init_home_volume
   for volume in "${shared_volumes[@]}"; do
     docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
   done
   # --remove-orphans: nach "devdock tailscale off" verschwindet der Sidecar
-  compose up -d --remove-orphans "$@"
+  compose up -d --remove-orphans "${up_args[@]}" "$@"
 }
 
 # --upgrade baut ab dem mise-Layer neu und holt so die latest-Versionen, ohne
