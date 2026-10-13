@@ -54,8 +54,10 @@ if [[ -n ${DEVDOCK_WORKSPACE:-} ]]; then
   unset f
 fi
 
-# MOTD: welche OpenKnowledge-Server mit dem Container gestartet wurden (ok
-# activate). In tmux nur im ersten Pane einer neuen Session, nicht in jedem.
+# MOTD: Netzlage im Tailscale-Workspace und welche OpenKnowledge-Server mit dem
+# Container gestartet wurden (ok activate). In tmux nur im ersten Pane einer
+# neuen Session, nicht in jedem.
 if [[ -z ${TMUX:-} || $(tmux display -p '#{session_windows}#{window_panes}' 2>/dev/null) == 11 ]]; then
+  devdock-net motd
   ok-autostart status
 fi

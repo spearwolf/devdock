@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Netzlage des Containers: Host-Netz oder eigener Namespace mit dem
+# Tailscale-Sidecar (devdock tailscale on). Für die Shell, ok-autostart und
+# "devdock ports" auf dem Host.
+#
+#   devdock-net url PORT   URL, unter der der Host einen Server auf PORT erreicht
+#   devdock-net motd       eine Zeile für die Shell, nur im Tailscale-Workspace
+#   devdock-net ports      lauschende Server dieses Containers samt URL
+set -euo pipefail
+
+die() { echo "devdock-net: $*" >&2; exit 1; }
+
+usage() {
+  sed -n '2,/^[^#]/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+}
+
+tailscale_mode() {
+  [[ ${DEVDOCK_NET:-host} == tailscale ]]
+}
+
+# Erste IPv4-Adresse eines Interfaces, leer, wenn es fehlt
+ipv4() {
+  local addr
+  addr=$(ip -4 -o addr show "$1" 2>/dev/null | awk '{print $4; exit}')
+  echo "${addr%/*}"
+}
+
+# Port steht in der Liste, die ./devdock auf 127.0.0.1 des Hosts publiziert
+published() {
+  [[ " ${DEVDOCK_PUBLISHED_PORTS:-} " == *" $1 "* ]]
+}
+
+url() {
+  if ! tailscale_mode || published "$1"; then
+    echo "http://localhost:$1"
+  else
+    echo "http://$(ipv4 eth0):$1"
+  fi
+}
+
+motd() {
+  tailscale_mode || return 0
+  local ts
+  ts=$(ipv4 tailscale0)
+  echo "Tailscale: ${DEVDOCK_TS_HOSTNAME:-?} (${ts:-nicht verbunden, auf dem Host: devdock tailscale login}) · von außen: $(ipv4 eth0)"
+}
+
+# ss -p nennt nur Prozesse, die in diesem Container sichtbar sind. Im Host-Netz
+# fallen so die Ports des Hosts und anderer Container heraus, im
+# Tailscale-Workspace die von tailscaled im Sidecar.
+ports() {
+  local -A procs=() addrs=()
+  local local_addr proc port addr reachable note
+  while read -r _ _ _ local_addr _ proc; do
+    [[ ${proc:-} == users:* ]] || continue
+    port=${local_addr##*:}
+    proc=${proc#*\"}
+    procs[$port]=${proc%%\"*}
+    addrs[$port]+=" ${local_addr%:*}"
+  done < <(ss -Hltnp)
+
+  if tailscale_mode; then
+    echo "${DEVDOCK_WORKSPACE:-?}  tailscale  ${DEVDOCK_TS_HOSTNAME:-?}  $(ipv4 eth0)"
+  else
+    echo "${DEVDOCK_WORKSPACE:-?}  host"
+  fi
+  for port in $(printf '%s\n' "${!procs[@]}" | sort -n); do
+    note=
+    if tailscale_mode; then
+      # Die Loopback-Weiterleitung im Sidecar deckt nur IPv4 ab
+      reachable=0
+      for addr in ${addrs[$port]}; do
+        if [[ $addr != '[::1]' ]]; then
+          reachable=1
+        fi
+      done
+      if ((!reachable)); then
+        note="  (nur [::1], von außen nicht erreichbar: auf 127.0.0.1 oder 0.0.0.0 starten)"
+      fi
+    fi
+    printf '  %-28s %s%s\n' "$(url "$port")" "${procs[$port]}" "$note"
+  done
+}
+
+case ${1:-} in
+  url)
+    [[ ${2:-} =~ ^[0-9]+$ ]] || die "url braucht einen Port"
+    url "$2"
+    ;;
+  motd) motd ;;
+  ports) ports ;;
+  -h | --help | help) usage ;;
+  *) die "unbekanntes Kommando '${1:-}' (siehe devdock-net --help)" ;;
+esac

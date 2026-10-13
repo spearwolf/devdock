@@ -48,7 +48,9 @@ port_of() {
   return 1
 }
 
-# Alle Container laufen im Host-Netz, ss sieht also auch deren Ports
+# Im Host-Netz sieht ss auch die Ports der anderen Container. Im
+# Tailscale-Workspace sieht ss nur den eigenen Namespace; dort konkurriert auch
+# kein anderer Workspace.
 listening() {
   [[ -n $(ss -Hltn "sport = :$1") ]]
 }
@@ -168,7 +170,7 @@ await_server() {
   local port=$1 i
   for ((i = 0; i < 120; i++)); do
     if listening "$port"; then
-      echo "OpenKnowledge läuft: http://localhost:$port"
+      echo "OpenKnowledge läuft: $(devdock-net url "$port")"
       return 0
     fi
     own_pid "$port" > /dev/null || break
@@ -198,7 +200,7 @@ activate() {
   fi
   if own_pid "$port" > /dev/null; then
     set_entry "$rel" "$port"
-    echo "OpenKnowledge läuft schon: http://localhost:$port"
+    echo "OpenKnowledge läuft schon: $(devdock-net url "$port")"
     return 0
   fi
   listening "$port" && die "Port $port ist belegt"
@@ -262,7 +264,7 @@ boot() {
       continue
     fi
     start_server "$port" "$dir"
-    note "$rel: gestartet auf http://localhost:$port"
+    note "$rel: gestartet auf $(devdock-net url "$port")"
   done < <(entries)
 }
 
@@ -292,7 +294,7 @@ status() {
     else
       state="(läuft nicht, Log: $run_dir/$port.log)"
     fi
-    lines+=("$(printf '  http://localhost:%-5s  %s%s' "$port" "$rel" "${state:+ $state}")")
+    lines+=("$(printf '  %-28s %s%s' "$(devdock-net url "$port")" "$rel" "${state:+ $state}")")
   done < <(entries)
   ((${#lines[@]})) || return 0
   echo "OpenKnowledge:"
