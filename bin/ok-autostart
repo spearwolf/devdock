@@ -130,10 +130,20 @@ start_server() {
   local port=$1 dir=$2 log=$run_dir/$1.log
   mkdir -p "$run_dir"
   echo "--- $(date '+%F %T') ok start in $dir" >> "$log"
+  # Im Tailscale-Workspace kommt der Host über die Loopback-Weiterleitung des
+  # Sidecars: Der Peer ist nicht Loopback, Host und Origin sind die Bridge-IP
+  # (bzw. localhost bei publizierten Ports). Ohne Zustimmung antwortet
+  # OpenKnowledge darauf mit 403; die URL aus devdock-net kommt auf seine
+  # Host-/Origin-Allowlist. Der Server hat keine Authentifizierung, erreichbar
+  # ist er aber nur über die Bridge und publizierte Ports, nicht übers Tailnet.
+  local -a env=()
+  if [[ ${DEVDOCK_NET:-host} == tailscale ]]; then
+    env=(OK_ALLOW_EXTERNAL=1 "OK_EXTERNAL_URL=$(devdock-net url "$port")")
+  fi
   # setsid löst den Server vom Terminal: Er überlebt das tmux-Pane, aus dem
   # "ok activate" kam. Weil die Subshell kein Gruppenführer ist, forkt setsid
-  # nicht, und $! bleibt die PID des Servers (ok und setsid machen exec).
-  (cd "$dir" && exec setsid ok start --no-open-browser --idle-shutdown off --port "$port") \
+  # nicht, und $! bleibt die PID des Servers (ok, env und setsid machen exec).
+  (cd "$dir" && exec env "${env[@]}" setsid ok start --no-open-browser --idle-shutdown off --port "$port") \
     < /dev/null >> "$log" 2>&1 &
   echo $! > "$run_dir/$port.pid"
 }
