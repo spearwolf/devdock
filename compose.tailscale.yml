@@ -1,0 +1,63 @@
+# Tailscale-Workspace (devdock tailscale on): Der Sidecar hält einen eigenen
+# Netz-Namespace samt tailscale0, dev teilt ihn statt des Host-Netzes.
+# NET_ADMIN und /dev/net/tun wirken nur in diesem Namespace, der Host bleibt
+# unberührt. Publizierte Ports hängt ./devdock als eigenes Overlay an.
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: devdock-${DEVDOCK_SLUG}
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      # Erlaubt die Weiterleitung von eth0 auf 127.0.0.1 (Entrypoint unten)
+      net.ipv4.conf.all.route_localnet: 1
+      # localhost löst sonst auf [::1] auf (Node, Vite, …), das die Weiterleitung
+      # nicht erreicht. Kostet die IPv6-Adresse im Tailnet.
+      net.ipv6.conf.all.disable_ipv6: 1
+    environment:
+      TS_USERSPACE: "false"
+      TS_STATE_DIR: /var/lib/tailscale
+      # Der Default-Pfad des CLI, damit "tailscale …" im Sidecar ohne --socket geht
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_HOSTNAME: devdock-${DEVDOCK_SLUG}
+      TS_ACCEPT_DNS: "true"
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      # Ohne Auth-Key gibt containerboot nach 60 s auf, wenn niemand die
+      # Login-URL geöffnet hat, und dev verlöre sein Netz. So wartet er, bis
+      # "devdock tailscale login" erledigt ist.
+      TS_BOOT_TIMEOUT: 8760h
+    # Dev-Server lauschen oft nur auf 127.0.0.1 (Vite, Next, …). Neue
+    # TCP-Verbindungen über die Bridge landen deshalb auf dem Loopback;
+    # Antworten auf ausgehende Verbindungen, UDP (WireGuard) und tailscale0
+    # bleiben unberührt. Das iptables des Images ist legacy und findet auf
+    # nftables-Kerneln keine nat-Tabelle, daher erst iptables-nft.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        rule="-t nat -A PREROUTING -i eth0 -p tcp -j DNAT --to-destination 127.0.0.1"
+        iptables-nft $$rule 2>/dev/null || iptables-legacy $$rule \
+          || echo "devdock: Loopback-Weiterleitung nicht gesetzt" >&2
+        exec /usr/local/bin/containerboot
+    # dev darf im fremden Namespace selbst keine extra_hosts setzen
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+
+  dev:
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    environment:
+      DEVDOCK_NET: tailscale
+      DEVDOCK_TS_HOSTNAME: devdock-${DEVDOCK_SLUG}
+      DEVDOCK_PUBLISHED_PORTS: ${DEVDOCK_PUBLISHED_PORTS:-}
+
+# Gehört dem Compose-Projekt des Workspaces: <project>_tailscale-state. Bleibt
+# bei devdock down stehen und hält die Identität des Nodes.
+volumes:
+  tailscale-state: {}

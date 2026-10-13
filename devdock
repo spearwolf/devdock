@@ -307,6 +307,55 @@ slug=$(basename "$workspace")
 slug=${slug,,}
 slug=${slug//[^a-z0-9]/-}
 project="devdock-${slug}-$(printf %s "$workspace" | sha1sum | cut -c1-6)"
+export DEVDOCK_SLUG=$slug
+
+# --- Tailscale ---------------------------------------------------------------
+#
+# Existiert <workspace>/.devdock/tailscale (devdock tailscale on), läuft dev im
+# Netz-Namespace eines Tailscale-Sidecars statt im Host-Netz. Die Datei listet
+# die Ports, die auf 127.0.0.1 des Hosts publiziert werden. Compose kann sie
+# nicht selbst lesen, deshalb entsteht daraus ein eigenes Overlay.
+
+ts_marker=$workspace/.devdock/tailscale
+
+# Ohne führende Null: bash liest "08" sonst als (ungültige) Oktalzahl
+valid_port() {
+  [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (($1 <= 65535))
+}
+
+# Ports aus der Marker-Datei, einer pro Zeile; # leitet Kommentare ein
+tailscale_ports() {
+  local line
+  [[ -f $ts_marker ]] || return 0
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%%#*}
+    line=${line//[[:space:]]/}
+    [[ -n $line ]] || continue
+    valid_port "$line" || die "$ts_marker: '$line' ist kein Port"
+    echo "$line"
+  done < "$ts_marker"
+}
+
+export DEVDOCK_PUBLISHED_PORTS=
+if [[ -f $ts_marker ]]; then
+  files+=(-f "$here/compose.tailscale.yml")
+  ts_ports=$(tailscale_ports)
+  DEVDOCK_PUBLISHED_PORTS=${ts_ports//$'\n'/ }
+  if [[ -n $ts_ports ]]; then
+    ts_ports_file=$config_dir/.devdock/$project.ports.yml
+    mkdir -p "${ts_ports_file%/*}"
+    {
+      echo "# Von devdock aus $ts_marker erzeugt, bei jedem Aufruf neu"
+      echo "services:"
+      echo "  tailscale:"
+      echo "    ports:"
+      for port in $ts_ports; do
+        echo "      - \"127.0.0.1:$port:$port\""
+      done
+    } > "$ts_ports_file"
+    files+=(-f "$ts_ports_file")
+  fi
+fi
 
 # Die .env dient auch der Interpolation in den Compose-Files (Build-Argumente
 # wie DEVDOCK_NEOVIM_CONFIG). Ohne --env-file läse Compose stattdessen die .env
@@ -368,7 +417,8 @@ compose_up() {
   for volume in "${shared_volumes[@]}"; do
     docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null
   done
-  compose up -d "$@"
+  # --remove-orphans: nach "devdock tailscale off" verschwindet der Sidecar
+  compose up -d --remove-orphans "$@"
 }
 
 # --upgrade baut ab dem mise-Layer neu und holt so die latest-Versionen, ohne
