@@ -589,12 +589,39 @@ tailscale_login() {
   die "nach 30 s keine Login-URL (Log: devdock logs tailscale)"
 }
 
+# containerboot beendet sich, sobald tailscaled den Zustand Running verlässt,
+# und bricht damit den Logout-Request an den Server ab ("context canceled");
+# der Node bliebe im Tailnet. Abgemeldet wird deshalb bei gestopptem Workspace
+# mit einem kurzlebigen tailscaled ohne containerboot auf demselben
+# State-Volume. Userspace-Modus: Für den Logout braucht es kein tailscale0.
+tailscale_logout() {
+  require_tailscale
+  local volume=${project}_tailscale-state
+  docker volume inspect "$volume" >/dev/null 2>&1 \
+    || die "keine Tailnet-Identität für diesen Workspace (Volume $volume fehlt)"
+  if tailscale_running dev || tailscale_running tailscale; then
+    note "halte den Workspace an, laufende tmux-Sessions enden dabei"
+    compose stop >/dev/null 2>&1 || die "Workspace ließ sich nicht anhalten"
+  fi
+  docker run --rm -v "$volume:/var/lib/tailscale" --entrypoint sh tailscale/tailscale:stable -c '
+    tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale --socket=/tmp/ts.sock \
+      >/tmp/tailscaled.log 2>&1 &
+    i=0
+    until tailscale --socket=/tmp/ts.sock status --json >/dev/null 2>&1 || [ $i -ge 50 ]; do
+      i=$((i + 1))
+      sleep 0.2
+    done
+    tailscale --socket=/tmp/ts.sock logout'
+  note "abgemeldet; das nächste devdock startet den Workspace mit neuer Login-URL"
+}
+
 tailscale_cmd() {
   local tty=()
   case ${1:-} in
     on) shift; tailscale_on "$@" ;;
     off) tailscale_off ;;
     login) tailscale_login ;;
+    logout) tailscale_logout ;;
     *)
       require_tailscale
       (($#)) || set -- status

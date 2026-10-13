@@ -111,6 +111,16 @@ ok_if "off löscht den Marker" test ! -e "$fresh/.devdock/tailscale"
 fails_if "off ohne Marker scheitert" "$devdock" -w "$fresh" tailscale off
 check "off wirkt auf die Konfiguration" "$fresh" '.services.dev.network_mode == "host"'
 
+# logout ohne Tailnet-Identität: klare Meldung statt docker-Fehler
+ok_if "on für logout" "$devdock" -w "$fresh" tailscale on
+out=$("$devdock" -w "$fresh" tailscale logout 2>&1 || true)
+if grep -q 'keine Tailnet-Identität' <<<"$out"; then
+  pass "logout ohne State-Volume erklärt sich"
+else
+  fail "logout ohne State-Volume erklärt sich"
+fi
+ok_if "off nach logout-Test" "$devdock" -w "$fresh" tailscale off
+
 # Ein kaputter Marker darf die Kommandos nicht sperren, die ihn reparieren
 broken=$tmp/broken
 marker "$broken" '08\n'
