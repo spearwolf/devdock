@@ -1,0 +1,13 @@
+# Dauerhafte Tailnet-Identität (Zeile "persistent" in .devdock/tailscale, per
+# devdock tailscale on --persistent): Der State des Sidecars liegt im Volume
+# <project>_tailscale-state und übersteht devdock down. Abgemeldet wird mit
+# devdock tailscale logout bzw. forget, nicht von innen (siehe devdock).
+services:
+  tailscale:
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+
+volumes:
+  tailscale-state: {}

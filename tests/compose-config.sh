@@ -56,7 +56,8 @@ check "Marker: Weiterleitung per iptables-nft" "$ts" '.services.tailscale.entryp
 check "Marker: tailscaled wählt das Firewall-Backend selbst" "$ts" '.services.tailscale.environment.TS_DEBUG_FIREWALL_MODE == "auto"'
 check "Marker: route_localnet" "$ts" '.services.tailscale.sysctls["net.ipv4.conf.all.route_localnet"] | tostring == "1"'
 check "Marker: kein IPv6" "$ts" '.services.tailscale.sysctls["net.ipv6.conf.all.disable_ipv6"] | tostring == "1"'
-check "Marker: State-Volume" "$ts" '.volumes | has("tailscale-state")'
+check "Default ephemeral: kein State-Verzeichnis" "$ts" '.services.tailscale.environment | has("TS_STATE_DIR") | not'
+check "Default ephemeral: kein State-Volume" "$ts" '(.volumes // {}) | has("tailscale-state") | not'
 check "Marker: Netzlage im dev-Environment" "$ts" '.services.dev.environment.DEVDOCK_NET == "tailscale"'
 check "Marker: Node-Name im dev-Environment" "$ts" '.services.dev.environment.DEVDOCK_TS_HOSTNAME == "devdock-ts"'
 check "leerer Marker: keine Ports" "$ts" '.services.tailscale.ports == null'
@@ -69,12 +70,27 @@ check "Ports: Liste im dev-Environment" "$ts" '.services.dev.environment.DEVDOCK
 marker "$ts" '# Kommentar\r\n\r\n8080 # Dev-Server\r\n'
 check "Marker mit Kommentar, Leerzeile, CRLF" "$ts" '.services.dev.environment.DEVDOCK_PUBLISHED_PORTS == "8080"'
 
+marker "$ts" 'persistent\n5173\n'
+check "persistent: State-Verzeichnis" "$ts" '.services.tailscale.environment.TS_STATE_DIR == "/var/lib/tailscale"'
+check "persistent: State-Volume eingebunden" "$ts" \
+  '(.volumes | has("tailscale-state")) and ([.services.tailscale.volumes[] | select(.source == "tailscale-state")] | length == 1)'
+check "persistent: Ports bleiben Ports" "$ts" '.services.dev.environment.DEVDOCK_PUBLISHED_PORTS == "5173"'
+
 marker "$ts" 'abc\n'
 rejects "Marker mit Wort wird abgelehnt" "$ts"
 marker "$ts" '08\n'
 rejects "Marker mit führender Null wird abgelehnt" "$ts"
 marker "$ts" '99999\n'
 rejects "Marker mit Port über 65535 wird abgelehnt" "$ts"
+
+# says NAME MUSTER CMD...: die Ausgabe von CMD enthält MUSTER, der Exit-Code
+# zählt nicht (unter pipefail färbte er eine Pipe in grep rot)
+says() {
+  local name=$1 pattern=$2 out
+  shift 2
+  out=$("$@" 2>&1 || true)
+  if grep -q "$pattern" <<<"$out"; then pass "$name"; else fail "$name"; fi
+}
 
 # ok_if NAME CMD...: CMD muss gelingen; fails_if: CMD muss scheitern
 ok_if() {
@@ -99,27 +115,35 @@ ok_if "on schreibt die Ports" grep -qx 5173 "$fresh/.devdock/tailscale"
 ok_if "on ohne Ports" "$devdock" -w "$fresh" tailscale on
 ok_if "on ohne Ports lässt die Liste stehen" grep -qx 5173 "$fresh/.devdock/tailscale"
 check "on wirkt auf die Konfiguration" "$fresh" '.services.dev.network_mode == "service:tailscale"'
-# Ausgabe erst abfangen: unter pipefail färbte der Exit-Code 1 die Pipe rot
-out=$("$devdock" -w "$fresh" tailscale status 2>&1 || true)
-if grep -q 'Sidecar läuft nicht' <<<"$out"; then
-  pass "Durchreiche ohne laufenden Sidecar erklärt sich"
-else
-  fail "Durchreiche ohne laufenden Sidecar erklärt sich"
-fi
+says "Durchreiche ohne laufenden Sidecar erklärt sich" 'Sidecar läuft nicht' \
+  "$devdock" -w "$fresh" tailscale status
 ok_if "off" "$devdock" -w "$fresh" tailscale off
 ok_if "off löscht den Marker" test ! -e "$fresh/.devdock/tailscale"
 fails_if "off ohne Marker scheitert" "$devdock" -w "$fresh" tailscale off
 check "off wirkt auf die Konfiguration" "$fresh" '.services.dev.network_mode == "host"'
 
-# logout ohne Tailnet-Identität: klare Meldung statt docker-Fehler
-ok_if "on für logout" "$devdock" -w "$fresh" tailscale on
-out=$("$devdock" -w "$fresh" tailscale logout 2>&1 || true)
-if grep -q 'keine Tailnet-Identität' <<<"$out"; then
-  pass "logout ohne State-Volume erklärt sich"
-else
-  fail "logout ohne State-Volume erklärt sich"
-fi
-ok_if "off nach logout-Test" "$devdock" -w "$fresh" tailscale off
+# Modus: ephemeral ist Default, --persistent und --ephemeral schalten, Ports
+# und Modus ändern sich unabhängig voneinander
+mode=$tmp/mode
+mkdir -p "$mode"
+ok_if "on ohne Flag" "$devdock" -w "$mode" tailscale on 5173
+fails_if "on ohne Flag ist ephemeral" grep -qx persistent "$mode/.devdock/tailscale"
+ok_if "on --persistent" "$devdock" -w "$mode" tailscale on --persistent
+ok_if "on --persistent schreibt den Modus" grep -qx persistent "$mode/.devdock/tailscale"
+ok_if "on --persistent lässt die Ports stehen" grep -qx 5173 "$mode/.devdock/tailscale"
+ok_if "on 4700" "$devdock" -w "$mode" tailscale on 4700
+ok_if "on PORT lässt den Modus stehen" grep -qx persistent "$mode/.devdock/tailscale"
+fails_if "on PORT ersetzt die Ports" grep -qx 5173 "$mode/.devdock/tailscale"
+ok_if "on --ephemeral" "$devdock" -w "$mode" tailscale on --ephemeral
+fails_if "on --ephemeral entfernt den Modus" grep -qx persistent "$mode/.devdock/tailscale"
+ok_if "on --ephemeral lässt die Ports stehen" grep -qx 4700 "$mode/.devdock/tailscale"
+fails_if "on mit unbekannter Option scheitert" "$devdock" -w "$mode" tailscale on --sonstwas
+
+# logout und forget ohne Tailnet-Identität: klare Meldung statt docker-Fehler
+says "logout ephemeral erklärt sich" 'ephemeral' "$devdock" -w "$mode" tailscale logout
+ok_if "on --persistent für logout" "$devdock" -w "$mode" tailscale on --persistent
+says "logout ohne State-Volume erklärt sich" 'keine Tailnet-Identität' "$devdock" -w "$mode" tailscale logout
+says "forget ohne State-Volume erklärt sich" 'keine Tailnet-Identität' "$devdock" -w "$mode" tailscale forget
 
 # Ein kaputter Marker darf die Kommandos nicht sperren, die ihn reparieren
 broken=$tmp/broken

@@ -6,12 +6,14 @@
 #   devdock [-w DIR] shell          ... Login-Shell öffnen
 #   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
 #   devdock [-w DIR] up|down|ps|logs|config
-#   devdock [-w DIR] tailscale on [PORT...]
+#   devdock [-w DIR] tailscale on [--persistent|--ephemeral] [PORT...]
 #                                   Workspace ins Tailnet (eigenes Netz mit
 #                                   Tailscale-Sidecar); PORTs auf 127.0.0.1 des
-#                                   Hosts publizieren
-#   devdock [-w DIR] tailscale off  zurück ins Host-Netz, die Identität bleibt
+#                                   Hosts publizieren; Node per Default ephemeral
+#   devdock [-w DIR] tailscale off  zurück ins Host-Netz
 #   devdock [-w DIR] tailscale login  Login-URL des Sidecars zeigen
+#   devdock [-w DIR] tailscale logout  Workspace anhalten, Node abmelden
+#   devdock [-w DIR] tailscale forget  dauerhafte Identität abmelden und löschen
 #   devdock [-w DIR] tailscale ARGS...  tailscale-CLI im Sidecar (status, ping, …)
 #   devdock build [--upgrade]       Image neu bauen (Basis-Image frisch ziehen)
 #                                   (--upgrade holt die mise-Tools neu)
@@ -138,8 +140,25 @@ show_ports() {
   fi
 }
 
+# Meldet die Tailnet-Identität im State-Volume $1 ab. containerboot im Sidecar
+# beendet sich, sobald tailscaled den Zustand Running verlässt, und bricht damit
+# einen Logout von innen ab ("context canceled"); der Node bliebe im Tailnet.
+# Abgemeldet wird deshalb mit einem kurzlebigen tailscaled ohne containerboot,
+# im Userspace-Modus (ohne tailscale0). Der Sidecar muss dafür angehalten sein.
+logout_volume() {
+  docker run --rm -v "$1:/var/lib/tailscale" --entrypoint sh tailscale/tailscale:stable -c '
+    tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale --socket=/tmp/ts.sock \
+      >/tmp/tailscaled.log 2>&1 &
+    i=0
+    until tailscale --socket=/tmp/ts.sock status --json >/dev/null 2>&1 || [ $i -ge 50 ]; do
+      i=$((i + 1))
+      sleep 0.2
+    done
+    tailscale --socket=/tmp/ts.sock logout'
+}
+
 destroy() {
-  local yes=0 volumes=0 arg answer ids=() existing=()
+  local yes=0 volumes=0 arg answer ids=() existing=() ts_volumes=()
   for arg; do
     case $arg in
       -y | --yes) yes=1 ;;
@@ -154,11 +173,12 @@ destroy() {
     docker volume inspect "$arg" >/dev/null 2>&1 && existing+=("$arg")
   done
 
-  # Tailnet-Identitäten der Workspaces (<project>_tailscale-state)
+  # Dauerhafte Tailnet-Identitäten der Workspaces (<project>_tailscale-state)
   if ((volumes)); then
-    mapfile -t -O "${#existing[@]}" existing < <(
+    mapfile -t ts_volumes < <(
       docker volume ls -q --filter label=com.docker.compose.volume=tailscale-state | grep '^devdock-' || true
     )
+    existing+=("${ts_volumes[@]}")
   fi
 
   local has_image=0
@@ -180,6 +200,10 @@ destroy() {
   fi
 
   ((${#ids[@]})) && docker rm -f "${ids[@]}" >/dev/null
+  # Erst abmelden, sonst blieben die Nodes ohne Schlüssel im Tailnet stehen
+  for arg in "${ts_volumes[@]}"; do
+    logout_volume "$arg" >/dev/null 2>&1 || note "$arg: Abmelden gescheitert, der Node bleibt im Tailnet"
+  done
   ((has_image)) && docker image rm "$image" >/dev/null
   ((${#existing[@]})) && docker volume rm "${existing[@]}" >/dev/null
   note "erledigt"
@@ -368,22 +392,41 @@ valid_port() {
   [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (($1 <= 65535))
 }
 
-# Ports aus der Marker-Datei, einer pro Zeile; # leitet Kommentare ein
-tailscale_ports() {
+# Zeilen der Marker-Datei ohne Kommentare (#), Leerraum und Leerzeilen
+marker_lines() {
   local line
   [[ -f $ts_marker ]] || return 0
   while IFS= read -r line || [[ -n $line ]]; do
     line=${line%%#*}
     line=${line//[[:space:]]/}
-    [[ -n $line ]] || continue
+    if [[ -n $line ]]; then
+      echo "$line"
+    fi
+  done < "$ts_marker"
+}
+
+# Ports aus der Marker-Datei, einer pro Zeile
+tailscale_ports() {
+  local line
+  while IFS= read -r line; do
+    [[ $line == persistent ]] && continue
     valid_port "$line" || die "$ts_marker: '$line' ist kein Port"
     echo "$line"
-  done < "$ts_marker"
+  done < <(marker_lines)
+}
+
+# Die Zeile "persistent" behält die Identität über Neustarts (State-Volume);
+# ohne sie ist der Node ephemeral
+tailscale_persistent() {
+  [[ $'\n'$(marker_lines)$'\n' == *$'\n'persistent$'\n'* ]]
 }
 
 export DEVDOCK_PUBLISHED_PORTS=
 if [[ -f $ts_marker ]]; then
   files+=(-f "$here/compose.tailscale.yml")
+  if tailscale_persistent; then
+    files+=(-f "$here/compose.tailscale-state.yml")
+  fi
   if ! ts_ports=$(tailscale_ports); then
     # Ein kaputter Marker darf die Kommandos nicht sperren, die ihn ersetzen
     # oder den Container anhalten
@@ -531,33 +574,72 @@ warn_recreate() {
   note "der Container läuft noch im alten Netz; das nächste devdock erstellt ihn neu, laufende tmux-Sessions enden dabei"
 }
 
-# on [PORT...]: mit Ports wird die Liste ersetzt, ohne bleibt eine vorhandene stehen
+stop_workspace() {
+  if tailscale_running dev || tailscale_running tailscale; then
+    note "halte den Workspace an, laufende tmux-Sessions enden dabei"
+    compose stop >/dev/null 2>&1 || die "Workspace ließ sich nicht anhalten"
+  fi
+}
+
+has_state_volume() {
+  docker volume inspect "${project}_tailscale-state" >/dev/null 2>&1
+}
+
+# on [--persistent|--ephemeral] [PORT...]: Ports ersetzen die Liste, ein Flag
+# den Modus; was fehlt, bleibt, wie es ist (neu: ephemeral, keine Ports)
 tailscale_on() {
-  local port dir=${ts_marker%/*}
-  for port; do
-    valid_port "$port" || die "'$port' ist kein Port"
+  local arg mode dir=${ts_marker%/*} persistent=0 ports=() new_ports=0
+  if tailscale_persistent; then
+    persistent=1
+  fi
+  for arg; do
+    case $arg in
+      --persistent) persistent=1 ;;
+      --ephemeral) persistent=0 ;;
+      -*) die "tailscale on: unbekannte Option '$arg'" ;;
+      *)
+        valid_port "$arg" || die "'$arg' ist kein Port"
+        ports+=("$arg")
+        new_ports=1
+        ;;
+    esac
   done
+  if ((!new_ports)); then
+    mapfile -t ports < <(tailscale_ports 2>/dev/null || true)
+  fi
   if [[ ! -d $dir ]]; then
     mkdir -p "$dir"
     # .devdock/ ist lokaler Zustand und gehört nicht ins Repo
     echo '*' > "$dir/.gitignore"
   fi
-  if (($#)) || [[ ! -f $ts_marker ]]; then
-    {
-      echo "# devdock tailscale: ein Port pro Zeile, publiziert auf 127.0.0.1 des Hosts"
-      if (($#)); then
-        printf '%s\n' "$@"
-      fi
-    } > "$ts_marker"
+  {
+    echo "# devdock tailscale: ein Port pro Zeile, publiziert auf 127.0.0.1 des Hosts."
+    echo "# Die Zeile \"persistent\" behält die Tailnet-Identität über Neustarts,"
+    echo "# ohne sie ist der Node ephemeral."
+    if ((persistent)); then
+      echo persistent
+    fi
+    if ((${#ports[@]})); then
+      printf '%s\n' "${ports[@]}"
+    fi
+  } > "$ts_marker"
+  mode=ephemeral
+  ((persistent)) && mode=persistent
+  note "Tailscale ist für diesen Workspace an ($mode${ports[*]:+, Ports: ${ports[*]}})"
+  if ((!persistent)) && has_state_volume; then
+    note "eine dauerhafte Identität liegt noch im Volume ${project}_tailscale-state (abmelden und löschen: devdock tailscale forget)"
   fi
-  note "Tailscale ist für diesen Workspace an${*:+, Ports: $*}"
   warn_recreate
 }
 
 tailscale_off() {
   require_tailscale
+  if tailscale_persistent; then
+    note "Tailscale ist für diesen Workspace aus; die Identität bleibt im Volume ${project}_tailscale-state (ganz weg: devdock tailscale forget)"
+  else
+    note "Tailscale ist für diesen Workspace aus; der ephemeral Node verschwindet nach dem Anhalten aus dem Tailnet"
+  fi
   rm -f "$ts_marker"
-  note "Tailscale ist für diesen Workspace aus; die Identität bleibt im Volume ${project}_tailscale-state"
   warn_recreate
 }
 
@@ -589,30 +671,33 @@ tailscale_login() {
   die "nach 30 s keine Login-URL (Log: devdock logs tailscale)"
 }
 
-# containerboot beendet sich, sobald tailscaled den Zustand Running verlässt,
-# und bricht damit den Logout-Request an den Server ab ("context canceled");
-# der Node bliebe im Tailnet. Abgemeldet wird deshalb bei gestopptem Workspace
-# mit einem kurzlebigen tailscaled ohne containerboot auf demselben
-# State-Volume. Userspace-Modus: Für den Logout braucht es kein tailscale0.
+# Ein ephemeral Node meldet sich beim Anhalten selbst ab; ein dauerhafter wird
+# bei angehaltenem Workspace über sein State-Volume abgemeldet (logout_volume)
 tailscale_logout() {
   require_tailscale
-  local volume=${project}_tailscale-state
-  docker volume inspect "$volume" >/dev/null 2>&1 \
-    || die "keine Tailnet-Identität für diesen Workspace (Volume $volume fehlt)"
-  if tailscale_running dev || tailscale_running tailscale; then
-    note "halte den Workspace an, laufende tmux-Sessions enden dabei"
-    compose stop >/dev/null 2>&1 || die "Workspace ließ sich nicht anhalten"
+  if ! tailscale_persistent; then
+    stop_workspace
+    note "ephemeral: Der Node meldet sich beim Anhalten selbst ab, spätestens nach einer Stunde entfernt Tailscale ihn"
+    return 0
   fi
-  docker run --rm -v "$volume:/var/lib/tailscale" --entrypoint sh tailscale/tailscale:stable -c '
-    tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale --socket=/tmp/ts.sock \
-      >/tmp/tailscaled.log 2>&1 &
-    i=0
-    until tailscale --socket=/tmp/ts.sock status --json >/dev/null 2>&1 || [ $i -ge 50 ]; do
-      i=$((i + 1))
-      sleep 0.2
-    done
-    tailscale --socket=/tmp/ts.sock logout'
+  has_state_volume || die "keine Tailnet-Identität für diesen Workspace (Volume ${project}_tailscale-state fehlt)"
+  stop_workspace
+  logout_volume "${project}_tailscale-state"
   note "abgemeldet; das nächste devdock startet den Workspace mit neuer Login-URL"
+}
+
+# Meldet die dauerhafte Identität ab und löscht ihr Volume. Geht auch, wenn
+# Tailscale für den Workspace schon aus oder ephemeral ist.
+tailscale_forget() {
+  local volume=${project}_tailscale-state
+  has_state_volume || die "keine Tailnet-Identität für diesen Workspace (Volume $volume fehlt)"
+  if [[ -n $(compose ps -aq 2>/dev/null) ]]; then
+    note "entferne die Container des Workspaces, laufende tmux-Sessions enden dabei"
+    compose down --remove-orphans >/dev/null 2>&1 || die "Container ließen sich nicht entfernen"
+  fi
+  logout_volume "$volume" || die "Abmelden gescheitert, das Volume $volume bleibt"
+  docker volume rm "$volume" >/dev/null
+  note "abgemeldet, Volume $volume gelöscht"
 }
 
 tailscale_cmd() {
@@ -622,6 +707,7 @@ tailscale_cmd() {
     off) tailscale_off ;;
     login) tailscale_login ;;
     logout) tailscale_logout ;;
+    forget) tailscale_forget ;;
     *)
       require_tailscale
       (($#)) || set -- status

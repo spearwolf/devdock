@@ -7,6 +7,7 @@
 #   compose.gitconfig.yml   ./gitconfig (rw) oder gefilterte Host-Git-Config (ro)
 #   compose.git-ignore.yml  globale Git-ignore-Liste des Hosts
 #   compose.tailscale.yml   eigenes Netz mit Tailscale-Sidecar statt Host-Netz
+#   compose.tailscale-state.yml  dauerhafte Tailnet-Identität (sonst ephemeral)
 
 services:
   dev:

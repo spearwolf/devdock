@@ -69,6 +69,7 @@ Docker verweigert einen subpath-Mount, dessen Verzeichnis fehlt. `./devdock` leg
 | `compose.gitconfig.yml` | `./gitconfig` oder Host-Git-Config vorhanden | globale Git-Config (siehe unten) |
 | `compose.git-ignore.yml` | `~/.config/git/ignore` vorhanden | globale ignore-Liste, read-only |
 | `compose.tailscale.yml` | `<workspace>/.devdock/tailscale` vorhanden | eigenes Netz mit Tailscale-Sidecar statt Host-Netz (siehe [Tailscale](#tailscale)) |
+| `compose.tailscale-state.yml` | dort zusätzlich die Zeile `persistent` | dauerhafte Tailnet-Identität im Volume statt ephemeral |
 
 Bei einem Start ohne Wayland, etwa per SSH auf einem Server, fällt das GUI-Overlay einfach weg.
 
@@ -141,7 +142,7 @@ Ein Workspace kann ins Tailnet, ohne dass der Host Tailscale bekommt. `devdock t
 ```bash
 devdock tailscale on 5173 4700   # einschalten, Ports auf localhost des Hosts publizieren
 devdock                          # erstellt den Container im neuen Netz
-devdock tailscale login          # einmalig: Login-URL zeigen (entfällt mit TS_AUTHKEY)
+devdock tailscale login          # Login-URL zeigen (entfällt mit TS_AUTHKEY)
 devdock tailscale status         # beliebige tailscale-Kommandos im Sidecar
 devdock ports                    # wo welcher Server von außen erreichbar ist
 devdock tailscale off            # zurück ins Host-Netz
@@ -149,7 +150,11 @@ devdock tailscale off            # zurück ins Host-Netz
 
 `on` und `off` ändern nur `<workspace>/.devdock/tailscale` (ein Port pro Zeile, `#` für Kommentare, von Hand editierbar). Wirksam wird das beim nächsten `devdock`, das den Container dafür neu erstellt; laufende tmux-Sessions enden dabei. `on` mit Ports ersetzt die Liste, ohne Ports bleibt sie.
 
-Jeder Workspace ist ein eigener Node namens `devdock-<workspace>` (auf 63 Zeichen gekürzt). Bis zum ersten Login wartet der Sidecar (`TS_BOOT_TIMEOUT`); `dev` erreicht bis dahin das Internet, aber nicht das Tailnet. Die Identität liegt im Volume `<projekt>_tailscale-state`, übersteht `devdock down` und `devdock tailscale off` und geht erst mit `destroy --volumes` oder von Hand: `devdock tailscale logout`, dann `docker volume rm <projekt>_tailscale-state` (den Namen zeigt `docker volume ls`). `logout` hält den Workspace dafür an und meldet mit einem kurzlebigen `tailscaled` ab: `containerboot` im Sidecar beendet sich, sobald der Node den Zustand „Running“ verlässt, und bräche einen Logout von innen ab, bevor der Server ihn bestätigt. Aus demselben Grund beendet `devdock tailscale down` den Sidecar samt Netz von `dev`; vorübergehend raus geht es mit `devdock tailscale off` oder `devdock down`. Mit `TS_AUTHKEY` in `.env` meldet sich ein neuer Workspace ohne Login-URL an; weil `.env` für alle Workspaces gilt, muss der Key *reusable* sein. Er landet nur im Sidecar, nicht im Environment von `dev`.
+Jeder Workspace ist ein eigener Node namens `devdock-<workspace>` (auf 63 Zeichen gekürzt). Bis zum Login wartet der Sidecar (`TS_BOOT_TIMEOUT`); `dev` erreicht bis dahin das Internet, aber nicht das Tailnet. Mit `TS_AUTHKEY` in `.env` meldet sich ein Workspace ohne Login-URL an; weil `.env` für alle Workspaces gilt, muss der Key *reusable* sein. Er landet nur im Sidecar, nicht im Environment von `dev`. Auth-Keys darf allerdings nur erzeugen, wer im Tailnet eine Admin-Rolle hat.
+
+Per Default ist der Node **ephemeral**: `tailscaled` hält seinen Zustand im Speicher, meldet sich beim Anhalten selbst ab, und Tailscale entfernt ihn spätestens eine Stunde, nachdem er offline gegangen ist. Im Tailnet bleibt so nichts zurück, auch ohne Admin-Rechte. Dafür braucht jeder neue Container (nach `devdock down`, Reboot oder Image-Update) einen neuen Login. Startet ein Workspace, bevor sein alter Node verschwunden ist, hängt Tailscale an den Namen ein Suffix an.
+
+`devdock tailscale on --persistent` macht die Identität dauerhaft: Sie liegt dann im Volume `<projekt>_tailscale-state` und übersteht `devdock down` und `devdock tailscale off`; `on --ephemeral` schaltet zurück. Weg ist sie mit `devdock tailscale forget` (abmelden, Volume löschen) oder `destroy --volumes`, das die Nodes ebenfalls erst abmeldet. `devdock tailscale logout` meldet ab und lässt das Volume stehen. Abgemeldet wird jeweils bei angehaltenem Workspace mit einem kurzlebigen `tailscaled`: `containerboot` im Sidecar beendet sich, sobald der Node den Zustand „Running“ verlässt, und bräche einen Logout von innen ab, bevor der Server ihn bestätigt. Aus demselben Grund beendet `devdock tailscale down` den Sidecar samt Netz von `dev`; vorübergehend raus geht es mit `devdock tailscale off` oder `devdock down`. Ein dauerhafter Node, dessen Volume ohne Abmelden verschwindet (`docker volume rm`), bleibt im Tailnet stehen, bis ein Admin ihn entfernt.
 
 Der Node ist im Tailnet auch erreichbar: Server in `dev`, die auf `0.0.0.0` lauschen (`vite --host`, Debugger, Datenbanken), sieht jeder Peer, den die ACLs des Tailnets durchlassen, bei der Default-ACL also alle. Server auf `127.0.0.1` bleiben dem Tailnet verborgen, die Weiterleitung gilt nur für die Bridge. Wer nur hinausgreifen will, setzt `TS_EXTRA_ARGS=--shields-up` in `.env`; dann nimmt der Node keine eingehenden Verbindungen an, auch kein `tailscale ssh` und `serve`.
 

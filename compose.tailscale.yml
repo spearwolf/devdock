@@ -1,7 +1,9 @@
 # Tailscale-Workspace (devdock tailscale on): Der Sidecar hält einen eigenen
 # Netz-Namespace samt tailscale0, dev teilt ihn statt des Host-Netzes.
 # NET_ADMIN und /dev/net/tun wirken nur in diesem Namespace, der Host bleibt
-# unberührt. Publizierte Ports hängt ./devdock als eigenes Overlay an.
+# unberührt. Ohne State-Verzeichnis hält tailscaled seinen Zustand im Speicher,
+# der Node ist damit ephemeral; compose.tailscale-state.yml macht ihn dauerhaft.
+# Publizierte Ports hängt ./devdock als eigenes Overlay an.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -18,7 +20,6 @@ services:
       net.ipv6.conf.all.disable_ipv6: 1
     environment:
       TS_USERSPACE: "false"
-      TS_STATE_DIR: /var/lib/tailscale
       # Der Default-Pfad des CLI, damit "tailscale …" im Sidecar ohne --socket geht
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
       TS_HOSTNAME: ${DEVDOCK_TS_HOSTNAME}
@@ -49,8 +50,6 @@ services:
     # dev darf im fremden Namespace selbst keine extra_hosts setzen
     extra_hosts:
       - host.docker.internal:host-gateway
-    volumes:
-      - tailscale-state:/var/lib/tailscale
 
   dev:
     network_mode: service:tailscale
@@ -60,8 +59,3 @@ services:
       DEVDOCK_NET: tailscale
       DEVDOCK_TS_HOSTNAME: ${DEVDOCK_TS_HOSTNAME}
       DEVDOCK_PUBLISHED_PORTS: ${DEVDOCK_PUBLISHED_PORTS:-}
-
-# Gehört dem Compose-Projekt des Workspaces: <project>_tailscale-state. Bleibt
-# bei devdock down stehen und hält die Identität des Nodes.
-volumes:
-  tailscale-state: {}
