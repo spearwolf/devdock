@@ -58,8 +58,8 @@ CONTAINER LIFECYCLE (this workspace)
                   devdock up
 
   down [ARGS]   Stop and remove this workspace's containers. Volumes stay.
-                Needed after `devdock build` (pick up the new image) and to
-                recover a broken Tailscale network. Ends running tmux sessions.
+                Needed to recover a broken Tailscale network or to get a
+                fresh container. Ends running tmux sessions.
                   devdock down && devdock
 
   ps [ARGS]     Containers of this workspace (`docker compose ps`).
@@ -74,19 +74,23 @@ CONTAINER LIFECYCLE (this workspace)
 IMAGE
   build [--upgrade] [ARGS]
                 Build devdock:latest, pulling a fresh Ubuntu base. Run once
-                at the start and whenever Dockerfile or config/ changed.
+                at the start and whenever Dockerfile, config/ or bin/
+                changed; devdock notices that on start and in `status`.
                 --upgrade  rebuild from the mise layer on, so all mise tools
                            (node, go, claude, ...) move to their latest
                            versions; apt layers stay cached
                 ARGS go to `docker compose build`, e.g. --no-cache.
                 Also refreshes the Tailscale sidecar image if present.
-                Running containers keep the old image until `devdock down`.
+                Running containers keep the old image until the next start
+                in their workspace (devdock, up, shell, exec) recreates
+                them, which ends their tmux sessions; devdock says so.
                   devdock build
                   devdock build --upgrade
 
 OVERVIEW (all workspaces)
   status        The image and every devdock container, online or offline,
                 marked when it runs on an outdated image or with Tailscale.
+                Also says when the image lacks changes from the repo.
                   devdock status
   ports         Listening servers in all running workspaces and the URL under
                 which the host reaches each of them.
@@ -170,7 +174,7 @@ CHEAT SHEET
   Second terminal, same view  devdock (attaches to the same tmux session)
   One-off command             devdock exec pnpm install
   Newer tool versions         devdock build --upgrade, then
-                              devdock down && devdock per workspace
+                              devdock per workspace
   Which containers run where  devdock status
   Where is my dev server      devdock ports
   Container acts up           devdock logs, then devdock down && devdock
@@ -254,15 +258,43 @@ DEVDOCK_DOCKER_GID=$(stat -c %g "$docker_sock")
 image=devdock:latest
 shared_volumes=(devdock-home devdock-cache devdock-addons)
 
+# Die Repo-Dateien, die der Build ins Image kopiert (tests/image-sources.sh
+# gleicht die Liste mit den COPY-Zeilen im Dockerfile ab). Ihr Hash geht als
+# Build-Argument SOURCE_HASH ins Label devdock.source-hash; weicht er vom
+# aktuellen ab, fehlt dem Image eine Änderung aus dem Repo. Basis-Image,
+# mise-Versionen und Neovim-Config deckt er nicht ab.
+image_sources=(
+  Dockerfile config/mise.toml config/bashrc
+  bin/install-hermes bin/hermes bin/install-openknowledge bin/ok bin/ok-autostart
+  bin/devdock-net bin/devdock-entrypoint
+)
+export DEVDOCK_SOURCE_HASH
+DEVDOCK_SOURCE_HASH=$(cd "$here" && sha256sum "${image_sources[@]}" 2>/dev/null | sha256sum | cut -c1-12) || true
+
+# Warum das Image nicht zum Repo passt, als Satz; leer, wenn es passt oder fehlt
+image_staleness() {
+  local built
+  built=$(docker image inspect -f '{{index .Config.Labels "devdock.source-hash"}}' "$image" 2>/dev/null) || return 0
+  if [[ -z $built || $built == "<no value>" ]]; then
+    echo "$image hat kein Quellstand-Label (älterer Build), ob ihm Änderungen aus dem Repo fehlen, ist unklar; neu bauen: devdock build"
+  elif [[ $built != "$DEVDOCK_SOURCE_HASH" ]]; then
+    echo "$image fehlen Änderungen an Dockerfile, config/ oder bin/; neu bauen: devdock build"
+  fi
+}
+
 devdock_containers() {
   docker ps -a --filter "label=com.docker.compose.project.working_dir=$here" "$@"
 }
 
 show_status() {
-  local image_id id state status dir container_image compose_project notes seen=0
+  local image_id id state status dir container_image compose_project notes seen=0 stale
   image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
   if [[ -n $image_id ]]; then
     docker image ls "$image" --format 'image  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}  {{.CreatedSince}}'
+    stale=$(image_staleness)
+    if [[ -n $stale ]]; then
+      echo "       $stale"
+    fi
   else
     echo "image  $image fehlt (devdock build)"
   fi
@@ -672,7 +704,18 @@ init_home_volume() {
 
 # Die geteilten Volumes sind in compose.yml external und werden hier angelegt.
 compose_up() {
-  local volume
+  local volume stale running image_id
+  stale=$(image_staleness)
+  if [[ -n $stale ]]; then
+    note "$stale"
+  fi
+  # Nach einem build ersetzt compose up einen Container auf dem alten Image von
+  # selbst, auch einen laufenden, an dem noch ein anderes Terminal hängt
+  running=$(compose ps -q --status running dev 2>/dev/null || true)
+  image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
+  if [[ -n $running && -n $image_id && $(docker inspect -f '{{.Image}}' "$running") != "$image_id" ]]; then
+    note "der Container läuft noch auf dem alten Image und wird jetzt neu erstellt, laufende tmux-Sessions enden dabei"
+  fi
   docker volume inspect devdock-home >/dev/null 2>&1 || init_home_volume
   for volume in "${shared_volumes[@]}"; do
     docker volume inspect "$volume" >/dev/null 2>&1 || docker volume create "$volume" >/dev/null

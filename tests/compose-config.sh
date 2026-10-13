@@ -42,6 +42,7 @@ plain=$tmp/plain
 mkdir -p "$plain"
 check "ohne Marker: Host-Netz" "$plain" '.services.dev.network_mode == "host"'
 check "ohne Marker: kein Sidecar" "$plain" '.services | has("tailscale") | not'
+check "Quellstand als Build-Argument" "$plain" '.services.dev.build.args.SOURCE_HASH | test("^[0-9a-f]{12}$")'
 
 ts=$tmp/ts
 marker "$ts" ''

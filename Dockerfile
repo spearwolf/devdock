@@ -146,6 +146,12 @@ sudo mkdir -p /opt/OpenKnowledge/resources/cli/bin
 sudo ln -s /usr/local/bin/ok /opt/OpenKnowledge/resources/cli/bin/ok.sh
 EOF
 
+# Hash über die Repo-Dateien, die dieser Build kopiert (image_sources in
+# ./devdock). Daran erkennt devdock ein Image, dem Änderungen aus dem Repo
+# fehlen. Steht nach dem letzten RUN, ein neuer Wert ändert nur das Label.
+ARG SOURCE_HASH=
+LABEL devdock.source-hash=${SOURCE_HASH}
+
 # Der Entrypoint startet die eingetragenen OpenKnowledge-Server und hält sie
 # beim Stoppen des Containers wieder an.
 ENTRYPOINT ["devdock-entrypoint"]
