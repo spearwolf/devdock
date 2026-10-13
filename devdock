@@ -16,6 +16,7 @@
 #   devdock build [--upgrade]       Image neu bauen (Basis-Image frisch ziehen)
 #                                   (--upgrade holt die mise-Tools neu)
 #   devdock status                  Image und alle Container mit online/offline
+#   devdock ports                   erreichbare Server aller laufenden Workspaces
 #   devdock destroy [-y] [--volumes]  alle Container und das Image löschen
 #                                   (--volumes auch die geteilten Volumes)
 #   devdock gitconfig               ./gitconfig aus der Host-Config erzeugen (danach read/write)
@@ -92,7 +93,7 @@ devdock_containers() {
 }
 
 show_status() {
-  local image_id id state status dir container_image notes seen=0
+  local image_id id state status dir container_image compose_project notes seen=0
   image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
   if [[ -n $image_id ]]; then
     docker image ls "$image" --format 'image  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}  {{.CreatedSince}}'
@@ -102,16 +103,39 @@ show_status() {
   echo
   {
     while IFS=$'\t' read -r id state status; do
-      IFS=$'\t' read -r dir container_image \
-        < <(docker inspect -f $'{{.Config.WorkingDir}}\t{{.Image}}' "$id")
+      IFS=$'\t' read -r dir container_image compose_project \
+        < <(docker inspect -f $'{{.Config.WorkingDir}}\t{{.Image}}\t{{index .Config.Labels "com.docker.compose.project"}}' "$id")
       notes=
       [[ $dir == "$workspace" ]] && { notes="dieser Workspace"; seen=1; }
       [[ -n $image_id && $container_image != "$image_id" ]] && notes+="${notes:+, }altes Image"
+      if [[ -n $(docker ps -aq --filter "label=com.docker.compose.project=$compose_project" \
+        --filter label=com.docker.compose.service=tailscale) ]]; then
+        notes+="${notes:+, }tailscale"
+      fi
       [[ $state == running ]] && state=online || state=offline
       printf '%s\t%s\t%s\t%s\n' "$state" "${dir/#$HOME/\~}" "$status" "$notes"
-    done < <(devdock_containers --format $'{{.ID}}\t{{.State}}\t{{.Status}}')
+    # Nur dev: Der Tailscale-Sidecar trägt dasselbe Label, aber keinen Workspace
+    done < <(devdock_containers --filter label=com.docker.compose.service=dev \
+      --format $'{{.ID}}\t{{.State}}\t{{.Status}}')
     ((seen)) || printf 'offline\t%s\tkein Container\tdieser Workspace\n' "${workspace/#$HOME/\~}"
   } | column -t -s $'\t'
+}
+
+# Erreichbare Server aller laufenden Workspaces. Was dort lauscht und unter
+# welcher URL der Host es erreicht, weiß nur der Container (devdock-net).
+show_ports() {
+  local id first=1
+  while read -r id; do
+    if ((!first)); then
+      echo
+    fi
+    first=0
+    docker exec "$id" devdock-net ports 2>/dev/null \
+      || echo "$(docker inspect -f '{{.Config.WorkingDir}}' "$id")  (Image ohne devdock-net; neu erstellen: devdock down, dann devdock)"
+  done < <(devdock_containers -q --filter label=com.docker.compose.service=dev --filter status=running)
+  if ((first)); then
+    note "kein devdock-Container läuft"
+  fi
 }
 
 destroy() {
@@ -130,6 +154,13 @@ destroy() {
     docker volume inspect "$arg" >/dev/null 2>&1 && existing+=("$arg")
   done
 
+  # Tailnet-Identitäten der Workspaces (<project>_tailscale-state)
+  if ((volumes)); then
+    mapfile -t -O "${#existing[@]}" existing < <(
+      docker volume ls -q --filter label=com.docker.compose.volume=tailscale-state | grep '^devdock-' || true
+    )
+  fi
+
   local has_image=0
   docker image inspect "$image" >/dev/null 2>&1 && has_image=1
   if ((!has_image && ${#ids[@]} == 0 && ${#existing[@]} == 0)); then
@@ -140,7 +171,7 @@ destroy() {
   echo "Gelöscht wird:"
   ((${#ids[@]})) && echo "  ${#ids[@]} Container (alle Workspaces, auch laufende)"
   ((has_image)) && echo "  Image $image"
-  ((${#existing[@]})) && echo "  Volumes ${existing[*]} (Home samt gh- und Claude-Login, Caches, optionale Tools)"
+  ((${#existing[@]})) && echo "  Volumes ${existing[*]} (Home samt gh- und Claude-Login, Caches, optionale Tools, Tailnet-Identitäten)"
 
   if ((!yes)); then
     [[ -t 0 ]] || die "destroy fragt nach; ohne Terminal nur mit -y"
@@ -157,6 +188,7 @@ destroy() {
 case $cmd in
   status) show_status; exit 0 ;;
   destroy) destroy "$@"; exit 0 ;;
+  ports) show_ports; exit 0 ;;
 esac
 
 files=(-f "$here/compose.yml")
@@ -568,7 +600,14 @@ case $cmd in
     [[ $# -gt 0 ]] || die "exec braucht ein Kommando"
     in_container "$@"
     ;;
-  build) build_image "$@" ;;
+  build)
+    build_image "$@"
+    # Das Sidecar-Image kommt nicht aus dem Build. Aktualisiert wird es, sobald
+    # ein Workspace es einmal benutzt hat.
+    if docker image inspect tailscale/tailscale:stable >/dev/null 2>&1; then
+      docker pull tailscale/tailscale:stable
+    fi
+    ;;
   up) compose_up "$@" ;;
   down) compose down "$@" ;;
   ps) compose ps "$@" ;;
