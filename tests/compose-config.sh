@@ -53,6 +53,7 @@ check "Marker: Node-Name aus dem Slug" "$ts" '.services.tailscale.environment.TS
 check "Marker: Kernel-Modus" "$ts" '.services.tailscale.environment.TS_USERSPACE == "false"'
 check "Marker: wartet auf den Login" "$ts" '.services.tailscale.environment.TS_BOOT_TIMEOUT == "8760h"'
 check "Marker: Weiterleitung per iptables-nft" "$ts" '.services.tailscale.entrypoint | tostring | test("iptables-nft")'
+check "Marker: tailscaled wählt das Firewall-Backend selbst" "$ts" '.services.tailscale.environment.TS_DEBUG_FIREWALL_MODE == "auto"'
 check "Marker: route_localnet" "$ts" '.services.tailscale.sysctls["net.ipv4.conf.all.route_localnet"] | tostring == "1"'
 check "Marker: kein IPv6" "$ts" '.services.tailscale.sysctls["net.ipv6.conf.all.disable_ipv6"] | tostring == "1"'
 check "Marker: State-Volume" "$ts" '.volumes | has("tailscale-state")'

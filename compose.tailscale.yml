@@ -29,6 +29,10 @@ services:
       # Login-URL geöffnet hat, und dev verlöre sein Netz. So wartet er, bis
       # "devdock tailscale login" erledigt ist.
       TS_BOOT_TIMEOUT: 8760h
+      # tailscaled nimmt sonst legacy-iptables und scheitert auf nftables-Kerneln
+      # an seinen eigenen Regeln. auto folgt dem Backend, in dem schon Regeln
+      # stehen, also dem, das die Weiterleitung unten gewählt hat.
+      TS_DEBUG_FIREWALL_MODE: auto
     # Dev-Server lauschen oft nur auf 127.0.0.1 (Vite, Next, …). Neue
     # TCP-Verbindungen über die Bridge landen deshalb auf dem Loopback;
     # Antworten auf ausgehende Verbindungen, UDP (WireGuard) und tailscale0
