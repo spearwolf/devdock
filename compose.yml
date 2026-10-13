@@ -6,6 +6,7 @@
 #   compose.tmux.yml        tmux-Config des Hosts
 #   compose.gitconfig.yml   ./gitconfig (rw) oder gefilterte Host-Git-Config (ro)
 #   compose.git-ignore.yml  globale Git-ignore-Liste des Hosts
+#   compose.tailscale.yml   eigenes Netz mit Tailscale-Sidecar statt Host-Netz
 
 services:
   dev:
@@ -22,7 +23,8 @@ services:
     # Zeit für devdock-entrypoint, die OpenKnowledge-Server sauber anzuhalten
     stop_grace_period: 30s
     # Host-Netz: Dev-Server im Container sind auf dem Host unter localhost erreichbar
-    # und umgekehrt; kein Port-Mapping nötig.
+    # und umgekehrt; kein Port-Mapping nötig. compose.tailscale.yml ersetzt es
+    # durch den Namespace des Tailscale-Sidecars.
     network_mode: host
     shm_size: 2gb
     group_add:

@@ -24,6 +24,8 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 ./devdock exec pnpm test     # einzelnes Kommando
 ./devdock down               # Container des Workspaces stoppen und entfernen
 ./devdock status             # Image und alle devdock-Container: online/offline
+./devdock ports              # erreichbare Server aller laufenden Workspaces
+./devdock tailscale on       # Workspace ins Tailnet (siehe Tailscale)
 ./devdock destroy            # alle devdock-Container und das Image löschen (fragt nach)
 ```
 
@@ -66,6 +68,7 @@ Docker verweigert einen subpath-Mount, dessen Verzeichnis fehlt. `./devdock` leg
 | `compose.tmux.yml` | `~/.config/tmux/tmux.conf` oder `~/.tmux.conf` | tmux-Config, read-only |
 | `compose.gitconfig.yml` | `./gitconfig` oder Host-Git-Config vorhanden | globale Git-Config (siehe unten) |
 | `compose.git-ignore.yml` | `~/.config/git/ignore` vorhanden | globale ignore-Liste, read-only |
+| `compose.tailscale.yml` | `<workspace>/.devdock/tailscale` vorhanden | eigenes Netz mit Tailscale-Sidecar statt Host-Netz (siehe [Tailscale](#tailscale)) |
 
 Bei einem Start ohne Wayland, etwa per SSH auf einem Server, fällt das GUI-Overlay einfach weg.
 
@@ -112,7 +115,7 @@ Der Launcher `ok` (auch `open-knowledge`) startet immer mit dem globalen Node au
 
 Den MCP-Server startet die `.mcp.json`, die `ok init` ins Projekt schreibt. Ihr Script probiert nacheinander die macOS-App, das Linux-Paket unter `/opt/OpenKnowledge` und zuletzt `npx -y @inkeep/open-knowledge@latest`. Das Image legt dort, wo das Linux-Paket erwartet wird (`/opt/OpenKnowledge/resources/cli/bin/ok.sh`), einen Symlink auf den Launcher an. So nutzen Claude Code, Codex und OpenCode die mit `install-openknowledge` installierte Version, ohne die `.mcp.json` des Projekts anzufassen; auf macOS funktioniert sie unverändert. npx holte sonst bei jedem Start übers Netz die neueste Version, die von der des `ok`-Servers abweichen kann. Ist OpenKnowledge nicht installiert, bricht der MCP-Start mit dem Hinweis auf `install-openknowledge` ab, statt auf npx auszuweichen.
 
-Die Web-App startet im Projekt mit `ok init` und `ok start --no-open-browser` (im Container gibt es keinen Browser, den `ok` öffnen könnte). Durch das Host-Netz ist sie direkt im Browser des Hosts erreichbar.
+Die Web-App startet im Projekt mit `ok init` und `ok start --no-open-browser` (im Container gibt es keinen Browser, den `ok` öffnen könnte). Durch das Host-Netz ist sie direkt im Browser des Hosts erreichbar, in einem Tailscale-Workspace unter der URL, die `ok-autostart` nennt.
 
 #### Autostart mit dem Container
 
@@ -130,6 +133,35 @@ Die Registry liegt bewusst nicht in `<workspace>/.ok/config.yml`: Diese Datei ma
 Die interaktive Shell zeigt beim Start, welche Server auf welchem Port laufen. In tmux erscheint das nur im ersten Pane einer neuen Session. Die Ausgabe der Server landet in `$XDG_RUNTIME_DIR/ok-autostart/<port>.log`, Meldungen vom Container-Start in `devdock logs`.
 
 Der Entrypoint bleibt als Elternprozess stehen, damit er die Server beim Stoppen des Containers per SIGTERM anhält (`stop_grace_period: 30s`). Ohne das bliebe nach dem SIGKILL von Docker `.ok/local/server.lock` mit der PID des Servers im Projekt liegen. Im nächsten Container gehört diese PID womöglich einem anderen Prozess: `ok start` hielte das Lock dann für aktiv, und `ok stop` beendete den fremden Prozess. Aus demselben Grund entfernt `ok-autostart` beim Container-Start ein Lock, auf dessen Port nichts lauscht, und hält nur Server an, die es selbst gestartet hat. `activate` und `deactivate` sind Unterbefehle des Launchers `ok` und keine von OpenKnowledge. Bekäme OpenKnowledge eigene Befehle mit diesen Namen, wären sie hinter dem Launcher versteckt; `ok-autostart activate` funktioniert in jedem Fall.
+
+## Tailscale
+
+Ein Workspace kann ins Tailnet, ohne dass der Host Tailscale bekommt. `devdock tailscale on` stellt ihn auf ein eigenes Netz um: Neben `dev` läuft dann ein Sidecar mit dem offiziellen Image `tailscale/tailscale`, und `dev` teilt dessen Netz-Namespace statt des Host-Netzes. Tailnet-Maschinen sind aus dem Container direkt erreichbar, auch per MagicDNS-Namen und mit Clients ohne Proxy-Unterstützung (`ssh`, `psql`, Go-Binaries). `NET_ADMIN` und `/dev/net/tun` bekommt nur der Sidecar, und beides wirkt nur in seinem Namespace.
+
+```bash
+devdock tailscale on 5173 4700   # einschalten, Ports auf localhost des Hosts publizieren
+devdock                          # erstellt den Container im neuen Netz
+devdock tailscale login          # einmalig: Login-URL zeigen (entfällt mit TS_AUTHKEY)
+devdock tailscale status         # beliebige tailscale-Kommandos im Sidecar
+devdock ports                    # wo welcher Server von außen erreichbar ist
+devdock tailscale off            # zurück ins Host-Netz
+```
+
+`on` und `off` ändern nur `<workspace>/.devdock/tailscale` (ein Port pro Zeile, `#` für Kommentare, von Hand editierbar). Wirksam wird das beim nächsten `devdock`, das den Container dafür neu erstellt; laufende tmux-Sessions enden dabei. `on` mit Ports ersetzt die Liste, ohne Ports bleibt sie.
+
+Jeder Workspace ist ein eigener Node namens `devdock-<workspace>`. Bis zum ersten Login wartet der Sidecar (`TS_BOOT_TIMEOUT`); `dev` erreicht bis dahin das Internet, aber nicht das Tailnet. Die Identität liegt im Volume `<projekt>_tailscale-state`, übersteht `devdock down` und `devdock tailscale off` und geht erst mit `destroy --volumes` oder von Hand: `devdock tailscale logout`, dann `docker volume rm <projekt>_tailscale-state` (den Namen zeigt `docker volume ls`). Mit `TS_AUTHKEY` in `.env` meldet sich ein neuer Workspace ohne Login-URL an; weil `.env` für alle Workspaces gilt, muss der Key *reusable* sein.
+
+Der Preis ist `localhost`:
+
+| Richtung | Host-Netz | Tailscale-Workspace |
+| --- | --- | --- |
+| Host → Server im Container | `localhost:PORT` | `localhost:PORT` für publizierte Ports, sonst die Bridge-IP (`devdock ports`) |
+| Container → Dienst auf dem Host | `localhost:PORT` | `host.docker.internal:PORT` |
+| Container → per `docker run -p` gestarteter Dienst | `localhost:PORT` | `host.docker.internal:PORT` |
+
+Server, die nur auf `127.0.0.1` lauschen (Vite, Next und viele andere per Default), sind trotzdem erreichbar: Der Sidecar leitet neue TCP-Verbindungen von seinem Bridge-Interface auf den Loopback weiter (`iptables-nft … DNAT --to-destination 127.0.0.1` samt `route_localnet`, nur in seinem Namespace). Die Weiterleitung kennt nur IPv4, deshalb ist IPv6 im Tailscale-Workspace aus: Node bindet `localhost` sonst an `[::1]`, und den erreicht von außen nichts. Damit fehlt auch die IPv6-Adresse im Tailnet. Die Shell nennt beim Start Node-Name, Tailnet-IP und Bridge-IP, `ok-autostart` die URL, unter der der Host OpenKnowledge erreicht. Weil jeder Tailscale-Workspace ein eigenes Netz hat, dürfen dort zwei Workspaces denselben Port benutzen, solange er nicht publiziert ist.
+
+`dev` hängt am Namespace des Sidecars. Wird der Sidecar allein neu gestartet (`docker restart`), verliert `dev` sein Netz; dann hilft `devdock down` und `devdock`. Fehlt auf dem Host `/dev/net/tun` (Kernel-Modul `tun`), startet der Workspace nicht, bis `devdock tailscale off` ihn zurückstellt.
 
 ## Umgebungsvariablen
 
