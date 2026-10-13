@@ -142,7 +142,9 @@ show_ports() {
 
 # Meldet die Tailnet-Identität im State-Volume $1 ab. containerboot im Sidecar
 # beendet sich, sobald tailscaled den Zustand Running verlässt, und bricht damit
-# einen Logout von innen ab ("context canceled"); der Node bliebe im Tailnet.
+# einen Logout von innen ab ("context canceled"), und der Login bliebe gültig.
+# Ein dauerhafter Node bleibt auch abgemeldet im Tailnet stehen, bis ein Admin
+# ihn entfernt; sofort verschwinden nur ephemeral Nodes.
 # Abgemeldet wird deshalb mit einem kurzlebigen tailscaled ohne containerboot,
 # im Userspace-Modus (ohne tailscale0). Der Sidecar muss dafür angehalten sein.
 logout_volume() {
@@ -200,7 +202,7 @@ destroy() {
   fi
 
   ((${#ids[@]})) && docker rm -f "${ids[@]}" >/dev/null
-  # Erst abmelden, sonst blieben die Nodes ohne Schlüssel im Tailnet stehen
+  # Erst abmelden, sonst bliebe der Login der Nodes gültig, bis ihr Key abläuft
   for arg in "${ts_volumes[@]}"; do
     logout_volume "$arg" >/dev/null 2>&1 || note "$arg: Abmelden gescheitert, der Node bleibt im Tailnet"
   done
