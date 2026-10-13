@@ -13,6 +13,10 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 
 Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-next), eine andere Config wählt `DEVDOCK_NEOVIM_CONFIG` in `.env` (siehe [Neovim-Config](#neovim-config)). Die Plugins und Mason-Tools sind schon beim Build installiert. Für Playwright-Browser sind die Systembibliotheken vorinstalliert, die Browser selbst nicht (siehe unten).
 
+### Warum Ubuntu
+
+Ubuntu 26.04 LTS ist die Basis aus genau einem Grund: Die Chromium-Binaries, die Playwright herunterlädt, laufen dort ohne Nacharbeit. Andere Gründe gab es nicht. Eine andere, deutlich schlankere Distro als Basis ist deshalb durchaus denkbar, geplant ist ein Wechsel derzeit aber nicht.
+
 ## Benutzung
 
 ```bash
