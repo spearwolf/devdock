@@ -1,39 +1,9 @@
 #!/usr/bin/env bash
 # devdock — Dev-Container für ein Workspace-Verzeichnis starten und betreten.
 #
-#   devdock [-w DIR] [tmux]         Container starten (falls nötig), tmux-Session
-#                                   "devdock" öffnen bzw. wieder anhängen
-#   devdock [-w DIR] shell          ... Login-Shell öffnen
-#   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
-#   devdock [-w DIR] up|down|ps|logs|config
-#   devdock [-w DIR] tailscale on [--persistent|--ephemeral] [PORT...]
-#                                   Workspace ins Tailnet (eigenes Netz mit
-#                                   Tailscale-Sidecar); PORTs auf 127.0.0.1 des
-#                                   Hosts publizieren; Node per Default ephemeral
-#   devdock [-w DIR] tailscale off  zurück ins Host-Netz
-#   devdock [-w DIR] tailscale login  Login-URL des Sidecars zeigen
-#   devdock [-w DIR] tailscale logout  Workspace anhalten, Node abmelden
-#   devdock [-w DIR] tailscale forget  dauerhafte Identität abmelden und löschen
-#   devdock [-w DIR] tailscale ARGS...  tailscale-CLI im Sidecar (status, ping, …)
-#   devdock build [--upgrade]       Image neu bauen (Basis-Image frisch ziehen)
-#                                   (--upgrade holt die mise-Tools neu)
-#   devdock status                  Image und alle Container mit online/offline
-#   devdock ports                   erreichbare Server aller laufenden Workspaces
-#   devdock destroy [-y] [--volumes]  alle Container und das Image löschen
-#                                   (--volumes auch die geteilten Volumes)
-#   devdock gitconfig               ./gitconfig aus der Host-Config erzeugen (danach read/write)
-#
-# DIR ist per Default das aktuelle Verzeichnis. Pro Workspace läuft ein eigener
-# Container; alle teilen sich das Image devdock:latest und die Volumes
-# devdock-home (~/.config, ~/.local, ~/.claude), devdock-cache und devdock-addons.
-# Variablen aus ./.env landen im Container (Vorlage: .env.example).
-# DEVDOCK_NEOVIM_CONFIG darin wählt beim Build das Git-Repo der Neovim-Config.
-#
-# Umgebung:
-#   DEVDOCK_CONFIG Verzeichnis für die lokale Config (.env, gitconfig, .devdock/)
-#                  statt des devdock-Repos
-#   DEVDOCK_ENV    Datei mit den Variablen für den Container statt
-#                  $DEVDOCK_CONFIG/.env bzw. ./.env
+# Die Bedienung steht in usage() (devdock --help, englisch). Neue oder
+# geänderte Kommandos, Optionen und Variablen gehören dort und in README.md
+# nachgetragen, beide bleiben im Gleichschritt mit dem Code.
 set -euo pipefail
 
 here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
@@ -42,14 +12,204 @@ die() { echo "devdock: $*" >&2; exit 1; }
 note() { echo "devdock: $*" >&2; }
 
 usage() {
-  sed -n '2,/^[^#]/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+  cat <<'USAGE'
+devdock - a disposable dev container per project, on your host's Docker
+
+  devdock [-w DIR] [COMMAND [ARGS...]]
+  devdock -h | --help | help
+
+Every workspace (a project directory, default: the current one) gets its own
+container from the shared image devdock:latest. The workspace appears inside
+under the same path as on the host, so `docker run -v $PWD:...` from within
+works against the host daemon. Home, caches and optional tools live in shared
+volumes and survive `devdock down`; the container itself is throwaway.
+
+Without a COMMAND, devdock starts the container if needed and attaches to the
+tmux session "devdock". That is the everyday entry point.
+
+OPTIONS
+  -w DIR        Use DIR as the workspace instead of the current directory.
+                Applies to all workspace commands; status, ports and destroy
+                always look at every workspace.
+                  devdock -w ~/code/foo
+  -h, --help    Show this help. `devdock help` does the same.
+
+WORKING IN A WORKSPACE
+  tmux          The default when no COMMAND is given. Start the container
+                if needed, then open or re-attach the tmux session "devdock".
+                Detach with your tmux prefix + d; the session keeps running
+                for the next `devdock`.
+                  devdock
+                  devdock -w ~/code/foo tmux
+
+  shell         Plain login shell instead of tmux. Handy for a quick look or
+                when your terminal multiplexer is already on the host.
+                  devdock shell
+
+  exec CMD...   Run one command in the container and return. Works without a
+                TTY too, so it fits scripts, editors and CI-like one-offs.
+                  devdock exec pnpm test
+                  devdock exec bash -lc 'go build ./... && go test ./...'
+
+CONTAINER LIFECYCLE (this workspace)
+  up [ARGS]     Start the container in the background without attaching.
+                Creates the shared volumes on first use. ARGS go to
+                `docker compose up`.
+                  devdock up
+
+  down [ARGS]   Stop and remove this workspace's containers. Volumes stay.
+                Needed after `devdock build` (pick up the new image) and to
+                recover a broken Tailscale network. Ends running tmux sessions.
+                  devdock down && devdock
+
+  ps [ARGS]     Containers of this workspace (`docker compose ps`).
+  logs [ARGS]   Their logs: entrypoint, OpenKnowledge autostart, Tailscale.
+                  devdock logs -f
+                  devdock logs tailscale
+  config [ARGS] The merged Compose config with all overlays devdock picked
+                (SSH agent, Wayland, GPU, tmux, git, Tailscale). Use it to
+                see why something is or isn't mounted.
+                  devdock config | less
+
+IMAGE
+  build [--upgrade] [ARGS]
+                Build devdock:latest, pulling a fresh Ubuntu base. Run once
+                at the start and whenever Dockerfile or config/ changed.
+                --upgrade  rebuild from the mise layer on, so all mise tools
+                           (node, go, claude, ...) move to their latest
+                           versions; apt layers stay cached
+                ARGS go to `docker compose build`, e.g. --no-cache.
+                Also refreshes the Tailscale sidecar image if present.
+                Running containers keep the old image until `devdock down`.
+                  devdock build
+                  devdock build --upgrade
+
+OVERVIEW (all workspaces)
+  status        The image and every devdock container, online or offline,
+                marked when it runs on an outdated image or with Tailscale.
+                  devdock status
+  ports         Listening servers in all running workspaces and the URL under
+                which the host reaches each of them.
+                  devdock ports
+
+TAILSCALE (this workspace)
+  Puts a single workspace into your tailnet via a sidecar container; the
+  host needs no Tailscale. The container then leaves the host network, so
+  localhost changes meaning (see the cheat sheet below). on/off only edit
+  <workspace>/.devdock/tailscale; the next `devdock` recreates the container.
+
+  tailscale on [--persistent|--ephemeral] [PORT...]
+                Switch the workspace to the tailnet. PORTs are published on
+                127.0.0.1 of the host and replace the previous list.
+                --ephemeral   default: identity lives in memory, the node
+                              vanishes from the tailnet after stopping; every
+                              new container needs a new login
+                --persistent  keep the identity in a volume across restarts
+                  devdock tailscale on 5173 4700 && devdock
+  tailscale off Back to the host network. A persistent identity is kept.
+  tailscale login
+                Start the workspace and print the login URL (not needed with
+                TS_AUTHKEY in .env).
+  tailscale logout
+                Stop the workspace and log the node out. Persistent nodes
+                stay listed in the tailnet until an admin removes them.
+  tailscale forget
+                Log out the persistent identity and delete its volume.
+  tailscale [ARGS...]
+                Any other tailscale CLI command, run in the sidecar
+                (default: status). Avoid `tailscale down`: it tears down the
+                container's network; use `tailscale off` or `devdock down`.
+                  devdock tailscale status
+                  devdock tailscale ping some-host
+
+SETUP AND CLEANUP
+  gitconfig     Write the file gitconfig into the config directory (the
+                devdock repo or $DEVDOCK_CONFIG), once, from the portable
+                parts of your host's global git config. From then on the
+                container owns it read/write, so `git config --global` and
+                `gh auth setup-git` persist. Without it, a filtered read-only
+                copy is regenerated on every start.
+  destroy [-y] [--volumes]
+                Remove all devdock containers (every workspace, running ones
+                too) and the image. Asks first unless -y (--yes).
+                --volumes  also delete the shared volumes: home with gh and
+                           Claude logins, shell history, caches, optional
+                           tools, Tailscale identities (logged out first)
+                  devdock destroy
+                  devdock destroy -y --volumes
+
+INSIDE THE CONTAINER
+  w [PATH]               cd to the workspace (or PATH inside it)
+  install-hermes         install Hermes Agent into the shared addons volume
+  install-openknowledge  install or update OpenKnowledge (`ok`)
+  ok activate [PORT]     autostart this OpenKnowledge project with the
+                         container
+  ok deactivate          remove it again; `ok-autostart` lists them
+  devdock-net ports      what listens here and the host URL for it
+  .devdock/bashrc.d/*    per-workspace shell scripts, sourced last
+
+ENVIRONMENT
+  Host variables:
+    DEVDOCK_CONFIG   directory for .env, gitconfig and generated .devdock/
+                     instead of the devdock repo (must exist)
+    DEVDOCK_ENV      file with the container variables, replaces .env
+  Everything in .env lands in the container (template: .env.example):
+    GH_TOKEN               gh and git over HTTPS without `gh auth login`
+    ANTHROPIC_API_KEY      Claude Code without /login (also other API keys)
+    DEVDOCK_NEOVIM_CONFIG  git URL of the Neovim config, used by `build`
+    TS_AUTHKEY             reusable Tailscale auth key, skips the login URL
+    TS_EXTRA_ARGS          extra `tailscale up` flags, e.g. --shields-up
+  Picked up from the host automatically, when present: the SSH agent
+  socket (SSH_AUTH_SOCK; no ~/.ssh, no keys), Wayland display and GPU, tmux
+  config, global git config and ignore list.
+
+CHEAT SHEET
+  First time ever             devdock build, then devdock
+  Work on a project           cd ~/code/foo && devdock
+  Same, from anywhere         devdock -w ~/code/foo
+  Second terminal, same view  devdock (attaches to the same tmux session)
+  One-off command             devdock exec pnpm install
+  Newer tool versions         devdock build --upgrade, then
+                              devdock down && devdock per workspace
+  Which containers run where  devdock status
+  Where is my dev server      devdock ports
+  Container acts up           devdock logs, then devdock down && devdock
+  Why is X (not) mounted      devdock config
+  Reach tailnet machines      devdock tailscale on && devdock,
+                              then devdock tailscale login
+  Vite on the host's localhost
+                              host network: just works; with Tailscale:
+                              devdock tailscale on 5173 && devdock
+  Host service from inside    localhost:PORT on the host network,
+                              host.docker.internal:PORT with Tailscale
+  Keep git config edits       devdock gitconfig
+  Separate config per client  DEVDOCK_ENV=~/secrets/work.env devdock
+  Free disk space             devdock destroy (keeps logins and caches)
+  Start over completely       devdock destroy --volumes
+
+More background in README.md next to this script.
+USAGE
+}
+
+# Im Terminal durch den Pager, die Hilfe ist länger als ein Bildschirm
+show_usage() {
+  if [[ -t 1 ]] && command -v "${PAGER:-less}" >/dev/null; then
+    usage | LESS=${LESS:-FRX} "${PAGER:-less}"
+  else
+    usage
+  fi
 }
 
 workspace=$PWD
-while getopts ':w:h' opt; do
+# "-:" fängt Langoptionen ab, OPTARG ist dann ihr Name (--help → help)
+while getopts ':w:h-:' opt; do
   case $opt in
     w) workspace=$OPTARG ;;
-    h) usage; exit 0 ;;
+    h) show_usage; exit 0 ;;
+    -) [[ $OPTARG == help ]] || die "unbekannte Option --$OPTARG (siehe devdock -h)"
+      show_usage
+      exit 0
+      ;;
     :) die "-$OPTARG braucht ein Verzeichnis" ;;
     *) die "unbekannte Option -$OPTARG (siehe devdock -h)" ;;
   esac
@@ -58,6 +218,10 @@ shift $((OPTIND - 1))
 
 cmd=${1:-tmux}
 [[ $# -gt 0 ]] && shift
+if [[ $cmd == help ]]; then
+  show_usage
+  exit 0
+fi
 
 [[ -d $workspace ]] || die "Workspace '$workspace' ist kein Verzeichnis"
 workspace=$(readlink -f "$workspace")

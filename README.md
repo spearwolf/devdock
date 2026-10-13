@@ -18,18 +18,23 @@ Neovim startet mit [nvim-config-next](https://github.com/spearwolf/nvim-config-n
 ```bash
 ./devdock build              # Image bauen (einmalig bzw. für Updates)
 ./devdock build --upgrade    # dito, mise-Tools auf die neuesten Versionen
-./devdock                    # Container fürs aktuelle Verzeichnis, tmux-Session
+./devdock                    # Container fürs aktuelle Verzeichnis, tmux-Session (= ./devdock tmux)
 ./devdock -w ~/code/foo      # dito im Workspace ~/code/foo
 ./devdock shell              # Login-Shell statt tmux
 ./devdock exec pnpm test     # einzelnes Kommando
+./devdock up                 # Container im Hintergrund starten, ohne sich anzuhängen
 ./devdock down               # Container des Workspaces stoppen und entfernen
+./devdock ps                 # Container des Workspaces (docker compose ps)
+./devdock logs -f            # deren Logs: Entrypoint, ok-autostart, Tailscale
+./devdock config             # zusammengesetzte Compose-Config samt aller Overlays
 ./devdock status             # Image und alle devdock-Container: online/offline
 ./devdock ports              # erreichbare Server aller laufenden Workspaces
 ./devdock tailscale on       # Workspace ins Tailnet (siehe Tailscale)
 ./devdock destroy            # alle devdock-Container und das Image löschen (fragt nach)
+./devdock --help             # alle Kommandos mit Beispielen und Cheat Sheet (englisch)
 ```
 
-`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen; die aktualisiert ein `./devdock down` mit anschließendem Neustart. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also das Home samt gh- und Claude-Login und Shell-History, die Caches und die optionalen Tools). `-y` überspringt die Rückfrage.
+`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen; die aktualisiert ein `./devdock down` mit anschließendem Neustart. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also das Home samt gh- und Claude-Login und Shell-History, die Caches und die optionalen Tools). `-y` (`--yes`) überspringt die Rückfrage.
 
 Wer `devdock` in den `PATH` verlinkt (`ln -s $PWD/devdock ~/.local/bin/`), kann es aus jedem Projekt heraus aufrufen.
 
@@ -203,5 +208,6 @@ Wirksam wird ein neuer Wert mit `./devdock build`; Docker baut dabei erst ab dem
 
 - Beim ersten `git clone git@github.com:…` fragt ssh nach dem Host-Key, weil im Container keine `known_hosts` existiert. Ohne SSH-Agent geht Git über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
 - `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird. `./devdock build --upgrade` erzwingt das ab dem mise-Layer; apt-Pakete und Basis-Setup bleiben im Cache. Danach baut Docker allerdings auch die späteren Layer neu (Playwright-Deps, Neovim-Plugins). `--no-cache` baut alles neu.
+- `./devdock --help` und diese README beschreiben dieselben Kommandos, Optionen und Variablen. `tests/help.sh` prüft das gegen den Code (ohne Docker); wer ein Kommando ergänzt, trägt es in beiden nach.
 - `config/` ist read-only unter `/opt/devdock/config` gemountet. Von dort kopiert `devdock-entrypoint` die Starship-Config einmalig ins Home-Volume.
 - `w` wechselt in den Workspace, `w src/lib` in ein Verzeichnis darin. Der Prompt zeigt den Workspace-Pfad als dessen Namen (`devdock/bin` statt `/home/…/devdock/bin`). Dafür steht in `directory.substitutions` der Starship-Config `'$DEVDOCK_WORKSPACE' = '$DEVDOCK_NAME'`. Starship selbst kennt keine Variablen; die Shell setzt beide in eine Kopie unter `$XDG_RUNTIME_DIR` ein und erneuert sie, sobald `~/.config/starship.toml` sich ändert.
