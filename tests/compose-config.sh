@@ -75,5 +75,40 @@ rejects "Marker mit führender Null wird abgelehnt" "$ts"
 marker "$ts" '99999\n'
 rejects "Marker mit Port über 65535 wird abgelehnt" "$ts"
 
+# ok_if NAME CMD...: CMD muss gelingen; fails_if: CMD muss scheitern
+ok_if() {
+  local name=$1
+  shift
+  if "$@" >/dev/null 2>&1; then pass "$name"; else fail "$name"; fi
+}
+fails_if() {
+  local name=$1
+  shift
+  if "$@" >/dev/null 2>&1; then fail "$name"; else pass "$name"; fi
+}
+
+fresh=$tmp/fresh
+mkdir -p "$fresh"
+fails_if "Durchreiche ohne Marker scheitert" "$devdock" -w "$fresh" tailscale status
+fails_if "on mit Unsinn scheitert" "$devdock" -w "$fresh" tailscale on 99999
+ok_if "on mit Unsinn schreibt keinen Marker" test ! -e "$fresh/.devdock/tailscale"
+ok_if "on 5173" "$devdock" -w "$fresh" tailscale on 5173
+ok_if "on legt .devdock/.gitignore an" grep -qx '\*' "$fresh/.devdock/.gitignore"
+ok_if "on schreibt die Ports" grep -qx 5173 "$fresh/.devdock/tailscale"
+ok_if "on ohne Ports" "$devdock" -w "$fresh" tailscale on
+ok_if "on ohne Ports lässt die Liste stehen" grep -qx 5173 "$fresh/.devdock/tailscale"
+check "on wirkt auf die Konfiguration" "$fresh" '.services.dev.network_mode == "service:tailscale"'
+# Ausgabe erst abfangen: unter pipefail färbte der Exit-Code 1 die Pipe rot
+out=$("$devdock" -w "$fresh" tailscale status 2>&1 || true)
+if grep -q 'Sidecar läuft nicht' <<<"$out"; then
+  pass "Durchreiche ohne laufenden Sidecar erklärt sich"
+else
+  fail "Durchreiche ohne laufenden Sidecar erklärt sich"
+fi
+ok_if "off" "$devdock" -w "$fresh" tailscale off
+ok_if "off löscht den Marker" test ! -e "$fresh/.devdock/tailscale"
+fails_if "off ohne Marker scheitert" "$devdock" -w "$fresh" tailscale off
+check "off wirkt auf die Konfiguration" "$fresh" '.services.dev.network_mode == "host"'
+
 ((fails == 0)) || { echo "$fails Prüfung(en) gescheitert"; exit 1; }
 echo "alle Prüfungen bestanden"

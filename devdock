@@ -6,6 +6,13 @@
 #   devdock [-w DIR] shell          ... Login-Shell öffnen
 #   devdock [-w DIR] exec CMD...    Kommando im Container ausführen
 #   devdock [-w DIR] up|down|ps|logs|config
+#   devdock [-w DIR] tailscale on [PORT...]
+#                                   Workspace ins Tailnet (eigenes Netz mit
+#                                   Tailscale-Sidecar); PORTs auf 127.0.0.1 des
+#                                   Hosts publizieren
+#   devdock [-w DIR] tailscale off  zurück ins Host-Netz, die Identität bleibt
+#   devdock [-w DIR] tailscale login  Login-URL des Sidecars zeigen
+#   devdock [-w DIR] tailscale ARGS...  tailscale-CLI im Sidecar (status, ping, …)
 #   devdock build [--upgrade]       Image neu bauen (Basis-Image frisch ziehen)
 #                                   (--upgrade holt die mise-Tools neu)
 #   devdock status                  Image und alle Container mit online/offline
@@ -461,6 +468,99 @@ in_container() {
     dev "$@"
 }
 
+# --- devdock tailscale -------------------------------------------------------
+#
+# on/off schalten nur die Marker-Datei; wirksam wird das beim nächsten
+# devdock, das den Container wegen des anderen Netzes neu erstellt. Alles
+# andere geht an das tailscale-CLI im Sidecar.
+
+tailscale_running() {
+  [[ -n $(compose ps -q --status running "$1" 2>/dev/null) ]]
+}
+
+require_tailscale() {
+  [[ -f $ts_marker ]] || die "Tailscale ist für diesen Workspace aus (einschalten: devdock tailscale on)"
+}
+
+warn_recreate() {
+  tailscale_running dev || return 0
+  note "der Container läuft noch im alten Netz; das nächste devdock erstellt ihn neu, laufende tmux-Sessions enden dabei"
+}
+
+# on [PORT...]: mit Ports wird die Liste ersetzt, ohne bleibt eine vorhandene stehen
+tailscale_on() {
+  local port dir=${ts_marker%/*}
+  for port; do
+    valid_port "$port" || die "'$port' ist kein Port"
+  done
+  if [[ ! -d $dir ]]; then
+    mkdir -p "$dir"
+    # .devdock/ ist lokaler Zustand und gehört nicht ins Repo
+    echo '*' > "$dir/.gitignore"
+  fi
+  if (($#)) || [[ ! -f $ts_marker ]]; then
+    {
+      echo "# devdock tailscale: ein Port pro Zeile, publiziert auf 127.0.0.1 des Hosts"
+      if (($#)); then
+        printf '%s\n' "$@"
+      fi
+    } > "$ts_marker"
+  fi
+  note "Tailscale ist für diesen Workspace an${*:+, Ports: $*}"
+  warn_recreate
+}
+
+tailscale_off() {
+  require_tailscale
+  rm -f "$ts_marker"
+  note "Tailscale ist für diesen Workspace aus; die Identität bleibt im Volume ${project}_tailscale-state"
+  warn_recreate
+}
+
+# Wert eines String-Felds aus "tailscale status --json" (stdin)
+json_field() {
+  grep -oE "\"$1\": *\"[^\"]*\"" | head -n1 | cut -d'"' -f4 || true
+}
+
+# Startet den Workspace und zeigt die Login-URL, sobald der Sidecar eine hat
+tailscale_login() {
+  require_tailscale
+  compose_up
+  local i json state url
+  for ((i = 0; i < 30; i++)); do
+    json=$(compose exec -T tailscale tailscale status --json 2>/dev/null || true)
+    state=$(json_field BackendState <<<"$json")
+    url=$(json_field AuthURL <<<"$json")
+    if [[ $state == Running ]]; then
+      note "schon angemeldet"
+      compose exec -T tailscale tailscale status --peers=false
+      return 0
+    fi
+    if [[ -n $url ]]; then
+      echo "$url"
+      return 0
+    fi
+    sleep 1
+  done
+  die "nach 30 s keine Login-URL (Log: devdock logs tailscale)"
+}
+
+tailscale_cmd() {
+  local tty=()
+  case ${1:-} in
+    on) shift; tailscale_on "$@" ;;
+    off) tailscale_off ;;
+    login) tailscale_login ;;
+    *)
+      require_tailscale
+      (($#)) || set -- status
+      tailscale_running tailscale || die "der Tailscale-Sidecar läuft nicht (starten: devdock up)"
+      [[ -t 0 && -t 1 ]] || tty=(-T)
+      compose exec "${tty[@]}" tailscale tailscale "$@"
+      ;;
+  esac
+}
+
 case $cmd in
   shell) in_container bash -l ;;
   tmux) in_container tmux new-session -A -s devdock ;;
@@ -474,5 +574,6 @@ case $cmd in
   ps) compose ps "$@" ;;
   logs) compose logs "$@" ;;
   config) compose config "$@" ;;
+  tailscale) tailscale_cmd "$@" ;;
   *) die "unbekanntes Kommando '$cmd' (siehe devdock -h)" ;;
 esac
