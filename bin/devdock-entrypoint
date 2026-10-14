@@ -28,6 +28,9 @@ for src in "$skel"/.config/* "$skel"/.local/*/*; do
   seed "$src" "$HOME/${src#"$skel"/}" || echo "devdock-entrypoint: ${src#"$skel"/} nicht übernommen" >&2
 done
 
+# Ziel des Symlinks ~/.ssh (Dockerfile); ssh legt es nicht selbst an.
+mkdir -p -m 0700 "$HOME/.config/ssh" || echo "devdock-entrypoint: ~/.config/ssh nicht angelegt" >&2
+
 # Die Starship-Config kommt aus dem devdock-Repo, einmalig; danach ist sie im
 # Volume frei editierbar.
 seed /opt/devdock/config/starship.toml "$HOME/.config/starship.toml" \

@@ -52,11 +52,11 @@ Der Workspace liegt im Container unter **demselben Pfad** wie auf dem Host. Dadu
 
 | Pfad | Unterverzeichnis | Inhalt, unter anderem |
 | --- | --- | --- |
-| `~/.config` | `config` | gh-Login, Starship, Neovim-Config, eigene mise-Tools |
+| `~/.config` | `config` | gh-Login, Starship, Neovim-Config, eigene mise-Tools, `~/.ssh` |
 | `~/.local` | `local` | Shell-History (atuin), Neovim-Plugins und Mason-Tools, `~/.local/bin` |
 | `~/.claude` | `claude` | Login, Settings und Verlauf von Claude Code |
 
-Was der Build selbst in `~/.config` und `~/.local` anlegt (Neovim-Config samt Plugins und Mason-Tools, den pnpm-Store-Pfad), verdeckt das Volume. Das Image hält es deshalb unter `/opt/devdock/skel` bereit, und `devdock-entrypoint` kopiert beim Container-Start jeden Eintrag (`.config/nvim`, `.local/share/nvim`, …), der im Volume noch ganz fehlt. Danach gehört er dem Volume: Ein Rebuild ändert ihn nicht mehr, ein `git pull` in `~/.config/nvim` bleibt. Zurück auf den Stand des Images geht es mit `rm -rf ~/.config/nvim ~/.local/share/nvim` und einem neuen Container (`./devdock down`, dann `./devdock`). Ebenso einmalig landet `config/starship.toml` als `~/.config/starship.toml` im Volume und ist dort frei editierbar; spätere Änderungen im Repo erreichen sie nicht mehr.
+Was der Build selbst in `~/.config` und `~/.local` anlegt (Neovim-Config samt Plugins und Mason-Tools, den pnpm-Store-Pfad), verdeckt das Volume. Das Image hält es deshalb unter `/opt/devdock/skel` bereit, und `devdock-entrypoint` kopiert beim Container-Start jeden Eintrag (`.config/nvim`, `.local/share/nvim`, …), der im Volume noch ganz fehlt. Danach gehört er dem Volume: Ein Rebuild ändert ihn nicht mehr, ein `git pull` in `~/.config/nvim` bleibt. Zurück auf den Stand des Images geht es mit `rm -rf ~/.config/nvim ~/.local/share/nvim` und einem neuen Container (`./devdock down`, dann `./devdock`). `~/.ssh` ist im Image ein Symlink auf `~/.config/ssh`, das `devdock-entrypoint` mit `0700` anlegt. So bleiben `known_hosts` und eine eigene `~/.ssh/config` über `./devdock down` hinweg erhalten und gelten für alle Workspaces. Keys gehören nicht dorthin, die kommen über den Agent des Hosts (siehe unten). Ebenso einmalig landet `config/starship.toml` als `~/.config/starship.toml` im Volume und ist dort frei editierbar; spätere Änderungen im Repo erreichen sie nicht mehr.
 
 Die Tools aus `config/mise.toml` gehören dagegen dem Image. mise installiert sie in seine System-Ebene (`/etc/mise/config.toml`, `/usr/local/share/mise`), die das Volume nicht verdeckt, und jeder Rebuild bringt neue Versionen mit. `~/.config/mise/config.toml` gilt zusätzlich und ist für eigene Tools da (`mise use -g …`). Die landen wie die Versionen, die ein Projekt pinnt, in `~/.local/share/mise` und überleben damit `./devdock down`, für alle Workspaces. Eine Kopie von `config/mise.toml` gehört nicht dorthin: Sie bliebe nach einem Rebuild auf dem alten Stand, und mise installierte die alten Versionen nebenher ins Volume.
 
@@ -73,7 +73,7 @@ Docker verweigert einen subpath-Mount, dessen Verzeichnis fehlt. `./devdock` leg
 | Overlay | Bedingung | Wirkung |
 | --- | --- | --- |
 | `compose.yml` | immer | Workspace, Docker-Socket (GID per `group_add`), Host-Netz, `/etc/localtime` |
-| `compose.ssh.yml` | `SSH_AUTH_SOCK` gesetzt | nur der Agent-Socket, kein `~/.ssh`, keine Keys |
+| `compose.ssh.yml` | `SSH_AUTH_SOCK` gesetzt | nur der Agent-Socket, nicht das `~/.ssh` des Hosts, keine Keys |
 | `compose.wayland.yml` | `WAYLAND_DISPLAY` gesetzt | Wayland-Socket, Toolkit-Variablen für Wayland |
 | `compose.gpu.yml` | Wayland + `/dev/dri` vorhanden | Render-Nodes samt video/render-Gruppe |
 | `compose.tmux.yml` | `~/.config/tmux/tmux.conf` oder `~/.tmux.conf` | tmux-Config, read-only |
@@ -214,7 +214,7 @@ Wirksam wird ein neuer Wert mit `./devdock build`; Docker baut dabei erst ab dem
 
 ## Hinweise
 
-- Beim ersten `git clone git@github.com:…` fragt ssh nach dem Host-Key, weil im Container keine `known_hosts` existiert. Ohne SSH-Agent geht Git über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
+- Beim ersten `git clone git@github.com:…` fragt ssh einmal nach dem Host-Key. Die Bestätigung landet in `~/.ssh/known_hosts` im Home-Volume und gilt danach in jedem Container und Workspace. Ohne SSH-Agent geht Git über HTTPS und den gh-Credential-Helper (`git clone https://github.com/…`).
 - `config/mise.toml` steht auf `latest`. `./devdock build` holt nur dann neue Versionen, wenn der Layer neu gebaut wird. `./devdock build --upgrade` erzwingt das ab dem mise-Layer; apt-Pakete und Basis-Setup bleiben im Cache. Danach baut Docker allerdings auch die späteren Layer neu (Playwright-Deps, Neovim-Plugins). `--no-cache` baut alles neu.
 - `./devdock --help` und diese README beschreiben dieselben Kommandos, Optionen und Variablen. `tests/help.sh` prüft das gegen den Code (ohne Docker); wer ein Kommando ergänzt, trägt es in beiden nach.
 - `config/` ist read-only unter `/opt/devdock/config` gemountet. Von dort kopiert `devdock-entrypoint` die Starship-Config einmalig ins Home-Volume.

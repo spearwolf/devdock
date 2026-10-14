@@ -1,4 +1,5 @@
-# Nur der Agent-Socket des Hosts wandert in den Container — keine Keys, keine ~/.ssh.
+# Nur der Agent-Socket des Hosts wandert in den Container — keine Keys, nicht die
+# ~/.ssh des Hosts. Die ~/.ssh des Containers liegt im Volume devdock-home.
 services:
   dev:
     environment:

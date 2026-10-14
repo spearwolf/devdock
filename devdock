@@ -164,8 +164,10 @@ ENVIRONMENT
     TS_AUTHKEY             reusable Tailscale auth key, skips the login URL
     TS_EXTRA_ARGS          extra `tailscale up` flags, e.g. --shields-up
   Picked up from the host automatically, when present: the SSH agent
-  socket (SSH_AUTH_SOCK; no ~/.ssh, no keys), Wayland display and GPU, tmux
-  config, global git config and ignore list.
+  socket (SSH_AUTH_SOCK; not the host's ~/.ssh, no keys), Wayland display
+  and GPU, tmux config, global git config and ignore list. The container's
+  own ~/.ssh (known_hosts) lives in the home volume, shared by all
+  workspaces.
 
 CHEAT SHEET
   First time ever             devdock build, then devdock

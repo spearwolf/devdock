@@ -128,6 +128,12 @@ sudo install -d -o "${USER_UID}" -g "${USER_GID}" /opt/devdock/skel
 mv ~/.config ~/.local /opt/devdock/skel/
 EOF
 
+# ~/.ssh liegt im Volume devdock-home unter ~/.config/ssh, damit known_hosts
+# und eine eigene ssh-Config devdock down überleben; sonst fragte ssh in jedem
+# neuen Container wieder nach dem Host-Key. Das Verzeichnis legt
+# devdock-entrypoint an.
+RUN ln -s .config/ssh ~/.ssh
+
 # Optionale Tools installiert man im Container mit ihrem install-*-Script ins
 # Volume devdock-addons; das Image bringt nur die Scripts und Launcher mit.
 # Hermes Agent: Checkout, eigenes Python/Node/Chromium und Nutzerdaten in
