@@ -6,6 +6,13 @@
 # nachgetragen, beide bleiben im Gleichschritt mit dem Code.
 set -euo pipefail
 
+# Bash liest ein Skript stückweise, während es läuft. Ändert sich die Datei,
+# solange ein langes Kommando wie devdock tmux läuft, liest Bash danach an der
+# alten Stelle in der neuen Datei weiter und bricht mit einem Syntaxfehler ab.
+# Der Block zwingt Bash, alles vor dem Start zu lesen, das exit am Ende lässt
+# es nicht mehr in die Datei zurückkehren.
+{
+
 here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 die() { echo "devdock: $*" >&2; exit 1; }
@@ -1006,3 +1013,5 @@ case $cmd in
     ;;
   *) die "unbekanntes Kommando '$cmd' (siehe devdock -h)" ;;
 esac
+exit
+}
