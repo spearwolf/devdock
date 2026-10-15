@@ -7,7 +7,7 @@ Dev-Container auf Basis von Ubuntu 26.04 LTS. Er nutzt den Docker-Daemon, den SS
 | Quelle | Tools |
 | --- | --- |
 | mise (Image, `config/mise.toml`) | node 26, pnpm 12, go, rust, neovim, tree-sitter, delta, gh, lazygit, lazydocker, atuin, starship, zoxide, fzf, opencode, claude (Claude Code), uv, bun |
-| apt | git, git-lfs, curl, jq, bat, mc, tmux, ripgrep, fd, build-essential, wl-clipboard |
+| apt | git, git-lfs, curl, jq, bat, mc, tmux, ripgrep, fd, rsync, sshpass, build-essential, wl-clipboard |
 | optional, per `install-*` im Container | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (`hermes`, `install-hermes`), [OpenKnowledge](https://openknowledge.ai) (`ok`, `install-openknowledge`) |
 | `docker:cli`-Image | docker, docker compose, docker buildx (nur CLI, der Daemon ist der des Hosts) |
 

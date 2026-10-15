@@ -19,7 +19,7 @@ RUN <<EOF
 set -eux
 apt-get update
 apt-get install -y --no-install-recommends \
-  ca-certificates curl wget git git-lfs jq bat mc tmux openssh-client sudo less \
+  ca-certificates curl wget git git-lfs jq bat mc tmux openssh-client sshpass rsync sudo less \
   build-essential pkg-config libssl-dev unzip zip xz-utils file procps iproute2 \
   ripgrep fd-find python3 python3-venv tzdata locales bash-completion \
   wl-clipboard wayland-utils fonts-dejavu-core fonts-noto-color-emoji
