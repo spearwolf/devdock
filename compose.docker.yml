@@ -1,0 +1,9 @@
+# Docker-Daemon des Hosts: Socket samt dessen Gruppe. Hängt ./devdock immer an,
+# außer in der Offline-Sandbox (compose.offline.yml): Über den Socket gingen
+# docker run --network host oder docker pull am fehlenden Netz vorbei.
+services:
+  dev:
+    group_add:
+      - "${DEVDOCK_DOCKER_GID}"
+    volumes:
+      - ${DEVDOCK_DOCKER_SOCK}:/var/run/docker.sock

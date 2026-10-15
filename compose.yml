@@ -1,6 +1,8 @@
 # Basis des Dev-Containers. Gestartet wird über ./devdock — das Script setzt die
 # DEVDOCK_*-Variablen und hängt je nach Host die Overlays an:
-#   compose.ssh.yml         SSH-Agent des Hosts
+#   compose.docker.yml      Docker-Socket des Hosts (nicht in der Offline-Sandbox)
+#   compose.offline.yml     Offline-Sandbox: kein Netz außer dem eigenen Loopback
+#   compose.ssh.yml         SSH-Agent des Hosts (nicht in der Offline-Sandbox)
 #   compose.wayland.yml     Wayland-Display des Hosts
 #   compose.gpu.yml         /dev/dri für hardwarebeschleunigtes Rendering
 #   compose.tmux.yml        tmux-Config des Hosts
@@ -27,11 +29,9 @@ services:
     stop_grace_period: 30s
     # Host-Netz: Dev-Server im Container sind auf dem Host unter localhost erreichbar
     # und umgekehrt; kein Port-Mapping nötig. compose.tailscale.yml ersetzt es
-    # durch den Namespace des Tailscale-Sidecars.
+    # durch den Namespace des Tailscale-Sidecars, compose.offline.yml durch none.
     network_mode: host
     shm_size: 2gb
-    group_add:
-      - "${DEVDOCK_DOCKER_GID}"
     # Lokale, gitignorte Variablen (Vorlage: .env.example); ./devdock wählt die
     # Datei: $DEVDOCK_ENV, sonst .env in $DEVDOCK_CONFIG bzw. im devdock-Repo
     env_file:
@@ -52,7 +52,6 @@ services:
     working_dir: ${DEVDOCK_WORKSPACE}
     volumes:
       - ${DEVDOCK_WORKSPACE}:${DEVDOCK_WORKSPACE}
-      - ${DEVDOCK_DOCKER_SOCK}:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
       - cache:/home/${DEVDOCK_USER}/.cache
       # Das bleibende Home: ein Volume, je ein Unterverzeichnis pro Pfad. Was das

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prüft die Compose-Konfiguration, die ./devdock für Workspaces mit und ohne
-# Tailscale erzeugt. Startet keinen Container; braucht docker (compose config)
-# und jq.
+# Tailscale und für die Offline-Sandbox erzeugt. Startet keinen Container;
+# braucht docker (compose config) und jq.
 set -euo pipefail
 
 devdock=$(readlink -f "$(dirname "${BASH_SOURCE[0]}")/../devdock")
@@ -15,13 +15,19 @@ fails=0
 pass() { echo "ok    $1"; }
 fail() { echo "FAIL  $1"; fails=$((fails + 1)); }
 
-# check NAME WORKSPACE JQ-FILTER: Filter muss auf der Konfiguration true ergeben
+# check NAME WORKSPACE JQ-FILTER [DEVDOCK-OPTION...]: Filter muss auf der
+# Konfiguration true ergeben
 check() {
-  if "$devdock" -w "$2" config --format json 2>/dev/null | jq -e "$3" >/dev/null 2>&1; then
+  if "$devdock" "${@:4}" -w "$2" config --format json 2>/dev/null | jq -e "$3" >/dev/null 2>&1; then
     pass "$1"
   else
     fail "$1"
   fi
+}
+
+# sandbox NAME WORKSPACE JQ-FILTER: check für devdock --offline-sandbox
+sandbox() {
+  check "$1" "$2" "$3" --offline-sandbox
 }
 
 # rejects NAME WORKSPACE: devdock config muss scheitern
@@ -43,6 +49,16 @@ mkdir -p "$plain"
 check "ohne Marker: Host-Netz" "$plain" '.services.dev.network_mode == "host"'
 check "ohne Marker: kein Sidecar" "$plain" '.services | has("tailscale") | not'
 check "Quellstand als Build-Argument" "$plain" '.services.dev.build.args.SOURCE_HASH | test("^[0-9a-f]{12}$")'
+check "ohne Sandbox: Docker-Socket" "$plain" '[.services.dev.volumes[] | select(.target == "/var/run/docker.sock")] | length == 1'
+check "ohne Sandbox: Projektname ohne -offline" "$plain" '.name | endswith("-offline") | not'
+
+# Offline-Sandbox: kein Netz, kein Socket, eigenes Projekt neben dem normalen
+sandbox "Sandbox: kein Netz" "$plain" '.services.dev.network_mode == "none"'
+sandbox "Sandbox: Netzlage im dev-Environment" "$plain" '.services.dev.environment.DEVDOCK_NET == "offline"'
+sandbox "Sandbox: kein Docker-Socket" "$plain" '[.services.dev.volumes[] | select(.target == "/var/run/docker.sock")] | length == 0'
+sandbox "Sandbox: eigenes Projekt" "$plain" '.name | endswith("-offline")'
+sandbox "Sandbox: Workspace und Home bleiben" "$plain" \
+  '[.services.dev.volumes[] | select(.source == "home" or .target == .source)] | length >= 4'
 
 ts=$tmp/ts
 marker "$ts" ''
@@ -62,6 +78,8 @@ check "Default ephemeral: kein State-Volume" "$ts" '(.volumes // {}) | has("tail
 check "Marker: Netzlage im dev-Environment" "$ts" '.services.dev.environment.DEVDOCK_NET == "tailscale"'
 check "Marker: Node-Name im dev-Environment" "$ts" '.services.dev.environment.DEVDOCK_TS_HOSTNAME == "devdock-ts"'
 check "leerer Marker: keine Ports" "$ts" '.services.tailscale.ports == null'
+sandbox "Sandbox ignoriert den Marker: kein Netz" "$ts" '.services.dev.network_mode == "none"'
+sandbox "Sandbox ignoriert den Marker: kein Sidecar" "$ts" '.services | has("tailscale") | not'
 
 marker "$ts" '5173\n4700\n'
 check "Ports: auf 127.0.0.1 publiziert" "$ts" \
@@ -107,6 +125,9 @@ fails_if() {
 
 fresh=$tmp/fresh
 mkdir -p "$fresh"
+fails_if "Sandbox: tailscale scheitert" "$devdock" --offline-sandbox -w "$fresh" tailscale on 5173
+ok_if "Sandbox: tailscale schreibt keinen Marker" test ! -e "$fresh/.devdock/tailscale"
+fails_if "unbekannte Langoption scheitert" "$devdock" --offline -w "$fresh" config
 fails_if "Durchreiche ohne Marker scheitert" "$devdock" -w "$fresh" tailscale status
 fails_if "on mit Unsinn scheitert" "$devdock" -w "$fresh" tailscale on 99999
 ok_if "on mit Unsinn schreibt keinen Marker" test ! -e "$fresh/.devdock/tailscale"
@@ -164,6 +185,16 @@ check "Auth-Key erreicht den Sidecar" "$keyed" '.services.tailscale.environment.
 check "Auth-Key bleibt aus dev heraus" "$keyed" '(.services.dev.environment.TS_AUTHKEY // "") == ""'
 check "Auth-Key bleibt aus dev im Host-Netz heraus" "$plain" '(.services.dev.environment.TS_AUTHKEY // "") == ""'
 rm "$DEVDOCK_CONFIG/.env"
+
+# Der Agent-Socket kommt in den normalen Container, nicht in die Sandbox
+agent=$tmp/agent.sock
+if python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$agent" 2>/dev/null; then
+  SSH_AUTH_SOCK=$agent check "SSH-Agent im normalen Container" "$plain" '.services.dev.environment.SSH_AUTH_SOCK != null'
+  SSH_AUTH_SOCK=$agent sandbox "kein SSH-Agent in der Sandbox" "$plain" \
+    '(.services.dev.environment.SSH_AUTH_SOCK == null) and ([.services.dev.volumes[] | select(.target | test("ssh-auth"))] | length == 0)'
+else
+  echo "skip  SSH-Agent (kein python3 für einen Test-Socket)"
+fi
 
 # Hostnamen dürfen höchstens 63 Zeichen haben, sonst startet der Sidecar nicht
 long=$tmp/$(printf 'a%.0s' {1..70})

@@ -34,11 +34,12 @@ Ubuntu 26.04 LTS ist die Basis aus genau einem Grund: Die Chromium-Binaries, die
 ./devdock status             # Image und alle devdock-Container: online/offline
 ./devdock ports              # erreichbare Server aller laufenden Workspaces
 ./devdock tailscale on       # Workspace ins Tailnet (siehe Tailscale)
+./devdock --offline-sandbox  # zweiter Container ohne Internet, neben dem normalen (siehe Offline-Sandbox)
 ./devdock destroy            # alle devdock-Container und das Image löschen (fragt nach)
 ./devdock --help             # alle Kommandos mit Beispielen und Cheat Sheet (englisch)
 ```
 
-`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen. Ein laufender Container wird im Betrieb nicht ersetzt: Weitere Aufrufe von `./devdock`, `up`, `shell` oder `exec` hängen sich an ihn an und weisen darauf hin, dass er noch auf dem alten Image läuft. Das neue Image übernimmt er erst nach `./devdock down` und dem nächsten Start. Ein angehaltener Container dagegen startet gleich mit dem neuen Image, denn Compose erstellt ihn bei geänderter Image-ID neu. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also das Home samt gh- und Claude-Login und Shell-History, die Caches und die optionalen Tools). `-y` (`--yes`) überspringt die Rückfrage.
+`status` und `destroy` sehen alle Workspaces, nicht nur den aktuellen. `status` markiert Container, die nach einem `build` noch auf dem alten Image laufen, und Offline-Sandboxes. Ein laufender Container wird im Betrieb nicht ersetzt: Weitere Aufrufe von `./devdock`, `up`, `shell` oder `exec` hängen sich an ihn an und weisen darauf hin, dass er noch auf dem alten Image läuft. Das neue Image übernimmt er erst nach `./devdock down` und dem nächsten Start. Ein angehaltener Container dagegen startet gleich mit dem neuen Image, denn Compose erstellt ihn bei geänderter Image-ID neu. `destroy` muss vor dem Image alle Container entfernen, auch laufende, sonst verweigert Docker das Löschen. Die Volumes bleiben dabei stehen, `destroy --volumes` nimmt auch sie mit (also das Home samt gh- und Claude-Login und Shell-History, die Caches und die optionalen Tools). `-y` (`--yes`) überspringt die Rückfrage.
 
 Ob dem Image Änderungen aus dem Repo fehlen, erkennt `devdock` selbst. Der Build trägt einen Hash über die Dateien, die er ins Image kopiert (`Dockerfile`, `config/mise.toml`, `config/bashrc`, die Scripts aus `bin/`), als Label `devdock.source-hash` ein. Passt der Hash nicht mehr zum Repo, etwa nach einem `git pull`, weisen `./devdock status` und jeder Start (`./devdock`, `up`, `shell`, `exec`) darauf hin, dass ein `./devdock build` fällig ist. Ein Image ohne das Label stammt aus einer älteren devdock-Version, sein Stand ist unbekannt. Nicht abgedeckt sind Änderungen außerhalb des Repos: ein neues Ubuntu-Basis-Image, neue `latest`-Versionen der mise-Tools (dafür `build --upgrade`) und neue Commits in der Neovim-Config. Welche Dateien zählen, steht in `image_sources` in `devdock`; `tests/image-sources.sh` prüft, dass die Liste zu den `COPY`-Zeilen im `Dockerfile` passt.
 
@@ -72,14 +73,16 @@ Docker verweigert einen subpath-Mount, dessen Verzeichnis fehlt. `./devdock` leg
 
 | Overlay | Bedingung | Wirkung |
 | --- | --- | --- |
-| `compose.yml` | immer | Workspace, Docker-Socket (GID per `group_add`), Host-Netz, `/etc/localtime` |
-| `compose.ssh.yml` | `SSH_AUTH_SOCK` gesetzt | nur der Agent-Socket, nicht das `~/.ssh` des Hosts, keine Keys |
+| `compose.yml` | immer | Workspace, Volumes, Host-Netz, `/etc/localtime` |
+| `compose.docker.yml` | immer, außer in der Offline-Sandbox | Docker-Socket (GID per `group_add`) |
+| `compose.offline.yml` | `--offline-sandbox` | kein Netz außer dem eigenen Loopback (siehe [Offline-Sandbox](#offline-sandbox)) |
+| `compose.ssh.yml` | `SSH_AUTH_SOCK` gesetzt, nicht in der Offline-Sandbox | nur der Agent-Socket, nicht das `~/.ssh` des Hosts, keine Keys |
 | `compose.wayland.yml` | `WAYLAND_DISPLAY` gesetzt | Wayland-Socket, Toolkit-Variablen für Wayland |
 | `compose.gpu.yml` | Wayland + `/dev/dri` vorhanden | Render-Nodes samt video/render-Gruppe |
 | `compose.tmux.yml` | `~/.config/tmux/tmux.conf` oder `~/.tmux.conf` | tmux-Config, read-only |
 | `compose.gitconfig.yml` | `./gitconfig` oder Host-Git-Config vorhanden | globale Git-Config (siehe unten) |
 | `compose.git-ignore.yml` | `~/.config/git/ignore` vorhanden | globale ignore-Liste, read-only |
-| `compose.tailscale.yml` | `<workspace>/.devdock/tailscale` vorhanden | eigenes Netz mit Tailscale-Sidecar statt Host-Netz (siehe [Tailscale](#tailscale)) |
+| `compose.tailscale.yml` | `<workspace>/.devdock/tailscale` vorhanden, nicht in der Offline-Sandbox | eigenes Netz mit Tailscale-Sidecar statt Host-Netz (siehe [Tailscale](#tailscale)) |
 | `compose.tailscale-state.yml` | dort zusätzlich die Zeile `persistent` | dauerhafte Tailnet-Identität im Volume statt ephemeral |
 
 Bei einem Start ohne Wayland, etwa per SSH auf einem Server, fällt das GUI-Overlay einfach weg.
@@ -182,6 +185,24 @@ Der Preis ist `localhost`:
 Server, die nur auf `127.0.0.1` lauschen (Vite, Next und viele andere per Default), sind trotzdem erreichbar: Der Sidecar leitet neue TCP-Verbindungen von seinem Bridge-Interface auf den Loopback weiter (`iptables-nft … DNAT --to-destination 127.0.0.1` samt `route_localnet`, nur in seinem Namespace). Die Weiterleitung kennt nur IPv4, deshalb ist IPv6 im Tailscale-Workspace aus: Node bindet `localhost` sonst an `[::1]`, und den erreicht von außen nichts. Damit fehlt auch die IPv6-Adresse im Tailnet. Die Shell nennt beim Start Node-Name, Tailnet-IP und Bridge-IP, `ok-autostart` die URL, unter der der Host OpenKnowledge erreicht. Weil jeder Tailscale-Workspace ein eigenes Netz hat, dürfen dort zwei Workspaces denselben Port benutzen, solange er nicht publiziert ist.
 
 `dev` hängt am Namespace des Sidecars. Wird der Sidecar allein neu gestartet (`docker restart`), verliert `dev` sein Netz; dann hilft `devdock down` und `devdock`. Fehlt auf dem Host `/dev/net/tun` (Kernel-Modul `tun`), startet der Workspace nicht, bis `devdock tailscale off` ihn zurückstellt.
+
+## Offline-Sandbox
+
+`devdock --offline-sandbox` startet für den Workspace einen zweiten Container, der nichts außerhalb seiner selbst erreicht: kein Internet, kein DNS, keine Dienste des Hosts. Geeignet ist er für Code, der nicht nach Hause telefonieren soll, für fremde Dependencies und Install-Scripts oder zum Testen, wie sich ein Tool ohne Netz verhält.
+
+```bash
+devdock --offline-sandbox                     # Sandbox starten, eigene tmux-Session
+devdock --offline-sandbox exec pnpm test      # einzelnes Kommando ohne Netz
+devdock --offline-sandbox down                # Sandbox entfernen, der normale Container läuft weiter
+```
+
+Die Option gilt für alle Workspace-Kommandos (`shell`, `exec`, `up`, `down`, `logs`, `config`, …). Die Sandbox ist ein eigenes Compose-Projekt (`<projekt>-offline`) aus demselben Image, mit demselben Workspace und denselben Volumes, also auch mit gh- und Claude-Login, Caches und optionalen Tools. Sie läuft neben dem normalen Container, keiner der beiden ersetzt oder beendet den anderen.
+
+Abgeschottet wird im Kernel: `network_mode: none` gibt dem Container nur sein eigenes Loopback. `localhost` funktioniert darin, Dev-Server und Tests gegen `localhost:PORT` laufen also, nur vom Host aus erreicht sie niemand (`devdock ports` sagt das auch). Damit nichts am fehlenden Netz vorbeiführt, fehlen außerdem der Docker-Socket (`docker run --network host` oder `docker pull` gingen sonst über den Daemon des Hosts ins Netz) und der SSH-Agent. `docker` gibt es in der Sandbox deshalb nicht, ebenso wenig Tailscale; `devdock --offline-sandbox tailscale …` bricht ab, und ein Tailscale-Marker des Workspaces gilt dort nicht. Wayland und GPU bleiben, GUI-Tests mit Playwright gehen also auch offline. Was ein Tool erst herunterladen muss (Playwright-Browser, `pnpm install` ohne Cache-Treffer), holt man vorher im normalen Container; über die geteilten Volumes und den Workspace steht es danach auch der Sandbox bereit. Claude Code und andere Agenten erreichen ihre API nicht und sind in der Sandbox nutzlos.
+
+Die Sandbox schottet das Netz ab, nicht das Dateisystem. Was in ihr läuft, kann im Workspace und in den Volumes schreiben, die der normale Container mit Netz benutzt, auch Scripts in `.devdock/bashrc.d/` und `~/.local/bin`. Secrets aus `.env` und die Logins im Home-Volume sind darin lesbar, verlassen den Container aber nicht.
+
+OpenKnowledge startet in der Sandbox nicht automatisch, und `ok activate` verweigert dort den Dienst. Die Sandbox teilt die Registry mit dem normalen Container, sieht aber dessen Ports nicht. Sie hielte das Lock eines dort laufenden Servers deshalb für verwaist und startete einen zweiten auf denselben Dateien.
 
 ## Umgebungsvariablen
 

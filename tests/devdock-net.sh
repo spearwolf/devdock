@@ -45,6 +45,10 @@ expect "url für publizierten Port" "http://localhost:5173" \
 expect "url: Teilstring ist kein publizierter Port" "http://$bridge:517" \
   "$(DEVDOCK_NET=tailscale DEVDOCK_PUBLISHED_PORTS='5173' "$net" url 517)"
 expect "motd im Host-Netz leer" "" "$(env -u DEVDOCK_NET "$net" motd)"
+expect "url in der Offline-Sandbox" "http://localhost:4700" "$(DEVDOCK_NET=offline "$net" url 4700)"
+expect "motd in der Offline-Sandbox" \
+  "Offline-Sandbox: kein Netz außer localhost, ohne docker und SSH-Agent; der Host erreicht hier nichts" \
+  "$(DEVDOCK_NET=offline "$net" motd)"
 expect "motd ohne tailscale0" \
   "Tailscale: devdock-x (nicht verbunden, auf dem Host: devdock tailscale login) · von außen: $bridge" \
   "$(DEVDOCK_NET=tailscale DEVDOCK_TS_HOSTNAME=devdock-x "$net" motd)"
@@ -74,6 +78,10 @@ fi
 out=$(env -u DEVDOCK_NET DEVDOCK_WORKSPACE=/ws "$net" ports)
 expect "ports: Kopfzeile Host-Netz" "/ws  host" "$(head -n1 <<<"$out")"
 expect_line "ports: Host-Netz nimmt localhost" 8101 "  http://localhost:8101 *python3"
+
+out=$(DEVDOCK_NET=offline DEVDOCK_WORKSPACE=/ws "$net" ports)
+expect "ports: Kopfzeile Offline-Sandbox" "/ws  offline-sandbox  (nur im Container erreichbar)" "$(head -n1 <<<"$out")"
+expect_line "ports: Offline-Sandbox nimmt localhost" 8101 "  http://localhost:8101 *python3"
 
 ((fails == 0)) || { echo "$fails Prüfung(en) gescheitert"; exit 1; }
 echo "alle Prüfungen bestanden"

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Netzlage des Containers: Host-Netz oder eigener Namespace mit dem
-# Tailscale-Sidecar (devdock tailscale on). Für die Shell, ok-autostart und
+# Netzlage des Containers: Host-Netz, eigener Namespace mit dem
+# Tailscale-Sidecar (devdock tailscale on) oder gar kein Netz
+# (devdock --offline-sandbox). Für die Shell, ok-autostart und
 # "devdock ports" auf dem Host.
 #
 #   devdock-net url PORT   URL, unter der der Host einen Server auf PORT erreicht
+#                          (in der Offline-Sandbox: nur der Container selbst)
 #   devdock-net motd       eine Zeile für die Shell, nur im Tailscale-Workspace
+#                          und in der Offline-Sandbox
 #   devdock-net ports      lauschende Server dieses Containers samt URL
 set -euo pipefail
 
@@ -16,6 +19,10 @@ usage() {
 
 tailscale_mode() {
   [[ ${DEVDOCK_NET:-host} == tailscale ]]
+}
+
+offline_mode() {
+  [[ ${DEVDOCK_NET:-host} == offline ]]
 }
 
 # Erste IPv4-Adresse eines Interfaces, leer, wenn es fehlt
@@ -39,6 +46,10 @@ url() {
 }
 
 motd() {
+  if offline_mode; then
+    echo "Offline-Sandbox: kein Netz außer localhost, ohne docker und SSH-Agent; der Host erreicht hier nichts"
+    return 0
+  fi
   tailscale_mode || return 0
   local ts
   ts=$(ipv4 tailscale0)
@@ -61,6 +72,8 @@ ports() {
 
   if tailscale_mode; then
     echo "${DEVDOCK_WORKSPACE:-?}  tailscale  ${DEVDOCK_TS_HOSTNAME:-?}  $(ipv4 eth0)"
+  elif offline_mode; then
+    echo "${DEVDOCK_WORKSPACE:-?}  offline-sandbox  (nur im Container erreichbar)"
   else
     echo "${DEVDOCK_WORKSPACE:-?}  host"
   fi

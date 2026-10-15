@@ -1,0 +1,10 @@
+# Offline-Sandbox (devdock --offline-sandbox): ein zweiter Container des
+# Workspaces, eigenes Compose-Projekt, dieselben Volumes. network_mode none
+# lässt nur sein eigenes Loopback übrig: kein Interface nach draußen, kein DNS,
+# auch keine Dienste des Hosts. Docker-Socket (compose.docker.yml) und
+# SSH-Agent (compose.ssh.yml) hängt ./devdock dafür gar nicht erst an.
+services:
+  dev:
+    network_mode: none
+    environment:
+      DEVDOCK_NET: offline

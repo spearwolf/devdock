@@ -30,6 +30,13 @@ require_workspace() {
   [[ -n $workspace ]] || die "DEVDOCK_WORKSPACE fehlt, der Container stammt von vor ok-autostart (neu starten: devdock down, dann devdock)"
 }
 
+# Die Offline-Sandbox teilt Workspace und Registry mit dem normalen Container,
+# sieht aber dessen Ports nicht. Sie hielte das Lock eines dort laufenden
+# Servers für verwaist und startete einen zweiten auf denselben Dateien.
+offline_sandbox() {
+  [[ ${DEVDOCK_NET:-host} == offline ]]
+}
+
 # Eingetragene Projekte als "PORT<Tab>PFAD"; Kommentare und Leerzeilen fallen weg
 entries() {
   [[ -f $registry ]] || return 0
@@ -193,6 +200,7 @@ await_server() {
 
 activate() {
   require_workspace
+  offline_sandbox && die "in der Offline-Sandbox gibt es keinen Autostart; ok activate im normalen Container, ok start geht hier von Hand"
   [[ -f $cli ]] || die "OpenKnowledge ist nicht installiert, installiert wird mit: install-openknowledge"
   local dir rel port=${1:-} current p r
   dir=$(project_root)
@@ -241,6 +249,10 @@ deactivate() {
 
 boot() {
   [[ -n $workspace && -f $registry ]] || return 0
+  if offline_sandbox; then
+    note "Offline-Sandbox: kein Autostart, die eingetragenen Server gehören dem normalen Container"
+    return 0
+  fi
   # PIDs aus einem früheren Lauf dieses Containers bedeuten jetzt nichts mehr
   rm -f "$run_dir"/*.pid
   if [[ ! -f $cli ]]; then
@@ -293,6 +305,7 @@ shutdown() {
 
 status() {
   [[ -n $workspace && -f $registry ]] || return 0
+  offline_sandbox && return 0
   local port rel state lines=()
   while IFS=$'\t' read -r port rel; do
     if [[ ! -f $cli ]]; then

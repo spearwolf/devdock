@@ -44,7 +44,11 @@ commands=$({
   grep -oE '\$cmd == [a-z]+' "$devdock" | cut -d' ' -f3 | grep -vx help
 } | sort -u)
 subcommands=$(sed -n '/^tailscale_cmd()/,/^}/p' "$devdock" | grep -oE '^    [a-z]+\)' | tr -d ' )')
-options=$(grep -oE '^ +--?[a-z][a-z-]*( \| --?[a-z-]+)*\)' "$devdock" | grep -oE -- '--?[a-z][a-z-]*' | sort -u)
+options=$({
+  grep -oE '^ +--?[a-z][a-z-]*( \| --?[a-z-]+)*\)' "$devdock" | grep -oE -- '--?[a-z][a-z-]*'
+  # Langoptionen vor dem Kommando: Zweige im -)-Fall der getopts-Schleife
+  sed -n '/^while getopts/,/^done/p' "$devdock" | grep -oE '^ +[a-z][a-z-]+\)' | tr -d ' )' | sed 's/^/--/'
+} | sort -u)
 host_vars=$(grep -oE '\$\{DEVDOCK_[A-Z_]+:-\}' "$devdock" | grep -oE 'DEVDOCK_[A-Z_]+' | sort -u)
 
 for c in $commands; do

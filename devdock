@@ -15,7 +15,7 @@ usage() {
   cat <<'USAGE'
 devdock - a disposable dev container per project, on your host's Docker
 
-  devdock [-w DIR] [COMMAND [ARGS...]]
+  devdock [-w DIR] [--offline-sandbox] [COMMAND [ARGS...]]
   devdock -h | --help | help
 
 Every workspace (a project directory, default: the current one) gets its own
@@ -32,6 +32,18 @@ OPTIONS
                 Applies to all workspace commands; status, ports and destroy
                 always look at every workspace.
                   devdock -w ~/code/foo
+  --offline-sandbox
+                Use the workspace's offline sandbox instead of its normal
+                container: a second container next to it, same image,
+                volumes and workspace, but no network except its own
+                localhost (no internet, no DNS, no host services), no Docker
+                socket and no SSH agent. It has its own tmux session, and
+                the host can't reach servers inside it. Applies to all
+                workspace commands; Tailscale and OpenKnowledge autostart
+                stay off there.
+                  devdock --offline-sandbox
+                  devdock --offline-sandbox exec pnpm test
+                  devdock --offline-sandbox down
   -h, --help    Show this help. `devdock help` does the same.
 
 WORKING IN A WORKSPACE
@@ -68,8 +80,9 @@ CONTAINER LIFECYCLE (this workspace)
                   devdock logs -f
                   devdock logs tailscale
   config [ARGS] The merged Compose config with all overlays devdock picked
-                (SSH agent, Wayland, GPU, tmux, git, Tailscale). Use it to
-                see why something is or isn't mounted.
+                (Docker, SSH agent, Wayland, GPU, tmux, git, Tailscale,
+                offline sandbox). Use it to see why something is or isn't
+                mounted.
                   devdock config | less
 
 IMAGE
@@ -89,7 +102,8 @@ IMAGE
 
 OVERVIEW (all workspaces)
   status        The image and every devdock container, online or offline,
-                marked when it runs on an outdated image or with Tailscale.
+                marked when it runs on an outdated image, with Tailscale or
+                as offline sandbox.
                 Also says when the image lacks changes from the repo.
                   devdock status
   ports         Listening servers in all running workspaces and the URL under
@@ -188,6 +202,13 @@ CHEAT SHEET
                               devdock tailscale on 5173 && devdock
   Host service from inside    localhost:PORT on the host network,
                               host.docker.internal:PORT with Tailscale
+  Run code without internet   devdock --offline-sandbox (next to the
+                              normal container, which keeps running)
+  Tests without internet      devdock --offline-sandbox exec pnpm test
+  Done with the sandbox       devdock --offline-sandbox down
+  Downloads for the sandbox   fetch them in the normal container first
+                              (pnpm install, playwright install); the
+                              sandbox sees the same workspace and caches
   Keep git config edits       devdock gitconfig
   Separate config per client  DEVDOCK_ENV=~/secrets/work.env devdock
   Free disk space             devdock destroy (keeps logins and caches)
@@ -207,14 +228,18 @@ show_usage() {
 }
 
 workspace=$PWD
+sandbox=0
 # "-:" fängt Langoptionen ab, OPTARG ist dann ihr Name (--help → help)
 while getopts ':w:h-:' opt; do
   case $opt in
     w) workspace=$OPTARG ;;
     h) show_usage; exit 0 ;;
-    -) [[ $OPTARG == help ]] || die "unbekannte Option --$OPTARG (siehe devdock -h)"
-      show_usage
-      exit 0
+    -)
+      case $OPTARG in
+        help) show_usage; exit 0 ;;
+        offline-sandbox) sandbox=1 ;;
+        *) die "unbekannte Option --$OPTARG (siehe devdock -h)" ;;
+      esac
       ;;
     :) die "-$OPTARG braucht ein Verzeichnis" ;;
     *) die "unbekannte Option -$OPTARG (siehe devdock -h)" ;;
@@ -289,7 +314,7 @@ devdock_containers() {
 }
 
 show_status() {
-  local image_id id state status dir container_image compose_project notes seen=0 stale
+  local image_id id state status dir container_image compose_project network notes seen=0 stale
   image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
   if [[ -n $image_id ]]; then
     docker image ls "$image" --format 'image  {{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}  {{.CreatedSince}}'
@@ -303,8 +328,8 @@ show_status() {
   echo
   {
     while IFS=$'\t' read -r id state status; do
-      IFS=$'\t' read -r dir container_image compose_project \
-        < <(docker inspect -f $'{{.Config.WorkingDir}}\t{{.Image}}\t{{index .Config.Labels "com.docker.compose.project"}}' "$id")
+      IFS=$'\t' read -r dir container_image compose_project network \
+        < <(docker inspect -f $'{{.Config.WorkingDir}}\t{{.Image}}\t{{index .Config.Labels "com.docker.compose.project"}}\t{{.HostConfig.NetworkMode}}' "$id")
       notes=
       [[ $dir == "$workspace" ]] && { notes="dieser Workspace"; seen=1; }
       [[ -n $image_id && $container_image != "$image_id" ]] && notes+="${notes:+, }altes Image"
@@ -312,6 +337,7 @@ show_status() {
         --filter label=com.docker.compose.service=tailscale) ]]; then
         notes+="${notes:+, }tailscale"
       fi
+      [[ $network == none ]] && notes+="${notes:+, }offline-sandbox"
       [[ $state == running ]] && state=online || state=offline
       printf '%s\t%s\t%s\t%s\n' "$state" "${dir/#$HOME/\~}" "$status" "$notes"
     # Nur dev: Der Tailscale-Sidecar trägt dasselbe Label, aber keinen Workspace
@@ -415,7 +441,14 @@ case $cmd in
   ports) show_ports; exit 0 ;;
 esac
 
+# Die Offline-Sandbox bekommt keinen Docker-Socket: Über den Daemon des Hosts
+# ginge docker run --network host oder docker pull am fehlenden Netz vorbei.
 files=(-f "$here/compose.yml")
+if ((sandbox)); then
+  files+=(-f "$here/compose.offline.yml")
+else
+  files+=(-f "$here/compose.docker.yml")
+fi
 
 # --- Lokale Config -----------------------------------------------------------
 #
@@ -437,8 +470,13 @@ if [[ -n ${DEVDOCK_ENV:-} ]]; then
 fi
 
 # --- SSH-Agent ---------------------------------------------------------------
+#
+# Ohne Netz hätte der Agent in der Offline-Sandbox nichts zu tun außer
+# Signaturen für jeden Prozess darin; er bleibt dort draußen.
 
-if [[ -n ${SSH_AUTH_SOCK:-} && -S $SSH_AUTH_SOCK ]]; then
+if ((sandbox)); then
+  :
+elif [[ -n ${SSH_AUTH_SOCK:-} && -S $SSH_AUTH_SOCK ]]; then
   export DEVDOCK_SSH_AUTH_SOCK
   DEVDOCK_SSH_AUTH_SOCK=$(readlink -f "$SSH_AUTH_SOCK")
   files+=(-f "$here/compose.ssh.yml")
@@ -570,6 +608,11 @@ slug=$(basename "$workspace")
 slug=${slug,,}
 slug=${slug//[^a-z0-9]/-}
 project="devdock-${slug}-$(printf %s "$workspace" | sha1sum | cut -c1-6)"
+# Die Offline-Sandbox ist ein eigenes Projekt: Sie läuft neben dem normalen
+# Container, und keiner der beiden ersetzt den anderen
+if ((sandbox)); then
+  project+=-offline
+fi
 export DEVDOCK_SLUG=$slug
 # Node- und Hostname des Sidecars; Hostnamen haben höchstens 63 Zeichen
 ts_hostname=devdock-${slug:0:55}
@@ -579,6 +622,8 @@ done
 export DEVDOCK_TS_HOSTNAME=$ts_hostname
 
 # --- Tailscale ---------------------------------------------------------------
+#
+# Die Offline-Sandbox hat kein Netz, der Marker gilt dort nicht.
 #
 # Existiert <workspace>/.devdock/tailscale (devdock tailscale on), läuft dev im
 # Netz-Namespace eines Tailscale-Sidecars statt im Host-Netz. Die Datei listet
@@ -622,7 +667,7 @@ tailscale_persistent() {
 }
 
 export DEVDOCK_PUBLISHED_PORTS=
-if [[ -f $ts_marker ]]; then
+if ((!sandbox)) && [[ -f $ts_marker ]]; then
   files+=(-f "$here/compose.tailscale.yml")
   if tailscale_persistent; then
     files+=(-f "$here/compose.tailscale-state.yml")
@@ -716,6 +761,9 @@ compose_up() {
   # deshalb, wie er ist; das neue Image bekommt er erst nach devdock down.
   running=$(compose ps -q --status running dev 2>/dev/null || true)
   image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
+  if ((sandbox)) && [[ -z $running ]]; then
+    note "Offline-Sandbox: kein Netz außer localhost, ohne Docker-Socket und SSH-Agent; der Host erreicht keine Server darin"
+  fi
   if [[ -n $running && -n $image_id && $(docker inspect -f '{{.Image}}' "$running") != "$image_id" \
     && " $* " != *" --force-recreate "* ]]; then
     up_args+=(--no-recreate)
@@ -952,6 +1000,9 @@ case $cmd in
   ps) compose ps "$@" ;;
   logs) compose logs "$@" ;;
   config) compose config "$@" ;;
-  tailscale) tailscale_cmd "$@" ;;
+  tailscale)
+    ((!sandbox)) || die "die Offline-Sandbox hat kein Netz und damit kein Tailscale (ohne --offline-sandbox aufrufen)"
+    tailscale_cmd "$@"
+    ;;
   *) die "unbekanntes Kommando '$cmd' (siehe devdock -h)" ;;
 esac
